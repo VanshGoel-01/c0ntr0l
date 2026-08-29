@@ -69,6 +69,41 @@ The project key is held only in browser memory. It is not written to local or
 session storage and is discarded on reload or disconnect. Incident acknowledge
 and resolve actions are project-scoped API updates persisted in PostgreSQL.
 
+## CLI
+
+Install the terminal client into the project virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e apps/cli
+```
+
+Set the control-plane URL and a project API key for the current terminal, then
+inspect the live system:
+
+```powershell
+$env:CONTROL_API_URL = "http://127.0.0.1:8000"
+$env:CONTROL_API_KEY = "<project-api-key>"
+
+c0ntr0l status
+c0ntr0l runs --limit 10
+c0ntr0l incidents --status open
+c0ntr0l run <execution-id>
+```
+
+Runtime intervention commands use the same project-scoped authorization:
+
+```powershell
+c0ntr0l cancel <execution-id>
+c0ntr0l recover <execution-id> --strategy stop
+c0ntr0l recover <execution-id> --strategy retry_modified --query "broader query"
+c0ntr0l recover <execution-id> --strategy model_handoff --provider ollama --model gemma3:1b
+```
+
+Use the global `--json` option for scripts. The CLI reads the key only from
+`CONTROL_API_KEY`, refuses remote plaintext HTTP and redirects, and does not
+require an SSH key. Any terminal with network access to the API can use it after
+installing the package and receiving a valid project key.
+
 ## Python Runtime Guard
 
 The SDK places the policy decision directly before a tool or model call. If
