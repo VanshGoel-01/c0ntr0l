@@ -2,39 +2,42 @@ openapi: 3.1.0
 info:
   title: c0ntr0l API
   version: 0.1.0
-  description: Shared hackathon contract for the gateway, dashboard, CLI, and tests.
+  description: Runtime safety and observability gateway for AI applications.
 servers:
   - url: http://localhost:8000
 paths:
   /health:
     get:
       operationId: getHealth
+      tags: [health]
       responses:
         "200":
-          description: Service health
+          description: Gateway and dependency health.
           content:
             application/json:
               schema:
-                type: object
-                required: [status]
-                properties:
-                  status:
-                    type: string
-                    enum: [ok, degraded]
+                $ref: "#/components/schemas/HealthResponse"
   /v1/chat/completions:
     post:
       operationId: createChatCompletion
+      tags: [chat]
+      security:
+        - bearerAuth: []
       parameters:
         - in: header
-          name: X-Control-Project-Id
-          required: true
-          schema:
-            type: string
-        - in: header
-          name: X-Control-User-Id
+          name: X-Request-Id
           required: false
           schema:
             type: string
+            minLength: 1
+            maxLength: 128
+        - in: header
+          name: X-Control-Demo-Scenario
+          required: false
+          description: Development-only deterministic provider scenario.
+          schema:
+            type: string
+            enum: [normal, timeout, provider_error, repeated_tool]
       requestBody:
         required: true
         content:
@@ -43,43 +46,106 @@ paths:
               $ref: "#/components/schemas/ChatRequest"
       responses:
         "200":
-          description: Streaming or complete provider response
-        "402":
-          description: Budget policy rejected the operation
-        "409":
-          description: Execution stopped by policy
+          description: Completed provider response with a durable execution identity.
+          headers:
+            X-Control-Execution-Id:
+              required: true
+              schema:
+                type: string
+                format: uuid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCompletion"
+        "401":
+          description: Missing, inactive, expired, or invalid project API key.
+        "501":
+          description: Streaming requested before durable reconciliation is implemented.
+        "502":
+          description: Provider unavailable or invalid provider response.
+        "504":
+          description: Provider timeout.
   /api/v1/executions:
     get:
       operationId: listExecutions
+      tags: [executions]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
       responses:
         "200":
-          description: Recent executions
+          description: Recent executions belonging to the authenticated project.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ExecutionSummary"
+        "401":
+          description: Invalid project API key.
   /api/v1/executions/{execution_id}:
     get:
       operationId: getExecution
+      tags: [executions]
+      security:
+        - bearerAuth: []
       parameters:
         - in: path
           name: execution_id
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         "200":
-          description: Execution with spans, usage, and policy evidence
-  /api/v1/executions/{execution_id}/cancel:
-    post:
-      operationId: cancelExecution
-      parameters:
-        - in: path
-          name: execution_id
-          required: true
-          schema:
-            type: string
-      responses:
-        "202":
-          description: Cancellation requested
+          description: Project-scoped execution with spans and normalized usage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionDetail"
+        "401":
+          description: Invalid project API key.
+        "404":
+          description: Execution does not exist in the authenticated project.
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: c0ntr0l project API key
   schemas:
+    DependencyHealth:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        detail:
+          type: [string, "null"]
+    HealthResponse:
+      type: object
+      required: [status, service, version, dependencies]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        service:
+          type: string
+        version:
+          type: string
+        dependencies:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/DependencyHealth"
     ChatMessage:
       type: object
       required: [role, content]
@@ -89,20 +155,230 @@ components:
           enum: [system, user, assistant, tool]
         content:
           type: string
+          minLength: 1
+          maxLength: 32768
+        name:
+          type: [string, "null"]
+          maxLength: 128
     ChatRequest:
       type: object
       required: [model, messages]
       properties:
         model:
           type: string
+          minLength: 1
+          maxLength: 128
         messages:
           type: array
+          minItems: 1
+          maxItems: 100
           items:
             $ref: "#/components/schemas/ChatMessage"
         stream:
           type: boolean
-          default: true
+          default: false
         max_tokens:
           type: integer
           minimum: 1
-
+          maximum: 4096
+          default: 256
+        temperature:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 2
+    Usage:
+      type: object
+      required: [prompt_tokens, completion_tokens, total_tokens]
+      properties:
+        prompt_tokens:
+          type: integer
+          minimum: 0
+        completion_tokens:
+          type: integer
+          minimum: 0
+        total_tokens:
+          type: integer
+          minimum: 0
+    FunctionCall:
+      type: object
+      required: [name, arguments]
+      properties:
+        name:
+          type: string
+        arguments:
+          type: string
+    ToolCall:
+      type: object
+      required: [id, type, function]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          const: function
+        function:
+          $ref: "#/components/schemas/FunctionCall"
+    ResponseMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          const: assistant
+        content:
+          type: [string, "null"]
+        tool_calls:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/ToolCall"
+    ChatChoice:
+      type: object
+      required: [index, message, finish_reason]
+      properties:
+        index:
+          type: integer
+        message:
+          $ref: "#/components/schemas/ResponseMessage"
+        finish_reason:
+          type: string
+    ChatCompletion:
+      type: object
+      required: [id, object, created, model, choices, usage]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: chat.completion
+        created:
+          type: integer
+        model:
+          type: string
+        choices:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ChatChoice"
+        usage:
+          $ref: "#/components/schemas/Usage"
+    SpanSummary:
+      type: object
+      required: [id, sequence_no, kind, name, status, started_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sequence_no:
+          type: integer
+        kind:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+        duration_ms:
+          type: [integer, "null"]
+        error_code:
+          type: [string, "null"]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+    UsageSummary:
+      type: object
+      required:
+        - source_type
+        - input_tokens
+        - output_tokens
+        - total_tokens
+        - cost_amount
+        - currency
+        - observed_at
+      properties:
+        source_type:
+          type: string
+        provider:
+          type: [string, "null"]
+        model:
+          type: [string, "null"]
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        cost_amount:
+          type: number
+        currency:
+          type: string
+        latency_ms:
+          type: [integer, "null"]
+        observed_at:
+          type: string
+          format: date-time
+    ExecutionSummary:
+      type: object
+      required:
+        - id
+        - status
+        - requested_model
+        - is_streaming
+        - started_at
+        - span_count
+        - total_tokens
+        - total_cost
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        requested_model:
+          type: string
+        active_provider:
+          type: [string, "null"]
+        active_model:
+          type: [string, "null"]
+        is_streaming:
+          type: boolean
+        input_fingerprint:
+          type: [string, "null"]
+        output_fingerprint:
+          type: [string, "null"]
+        final_reason:
+          type: [string, "null"]
+        error_code:
+          type: [string, "null"]
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: [string, "null"]
+          format: date-time
+        duration_ms:
+          type: [integer, "null"]
+        span_count:
+          type: integer
+          minimum: 0
+        total_tokens:
+          type: integer
+          minimum: 0
+        total_cost:
+          type: number
+          minimum: 0
+    ExecutionDetail:
+      allOf:
+        - $ref: "#/components/schemas/ExecutionSummary"
+        - type: object
+          required: [spans, usage]
+          properties:
+            spans:
+              type: array
+              items:
+                $ref: "#/components/schemas/SpanSummary"
+            usage:
+              type: array
+              items:
+                $ref: "#/components/schemas/UsageSummary"
