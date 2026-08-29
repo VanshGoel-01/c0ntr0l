@@ -57,10 +57,14 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
+    expose_documentation = resolved_settings.app_env != "production"
     application = FastAPI(
         title="c0ntr0l API",
         version=resolved_settings.service_version,
         lifespan=lifespan,
+        docs_url="/docs" if expose_documentation else None,
+        redoc_url="/redoc" if expose_documentation else None,
+        openapi_url="/openapi.json" if expose_documentation else None,
     )
     application.state.settings = resolved_settings
     application.add_middleware(

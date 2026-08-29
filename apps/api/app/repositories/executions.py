@@ -14,6 +14,57 @@ from app.domain.auth import ApiKeyPrincipal
 from app.domain.executions import ExecutionTrace
 from app.infrastructure.database import Database
 
+_EXECUTION_SUMMARY_SELECT = """
+    SELECT
+        execution.id,
+        execution.status,
+        execution.requested_model,
+        execution.active_provider,
+        execution.active_model,
+        execution.is_streaming,
+        execution.input_fingerprint,
+        execution.output_fingerprint,
+        execution.final_reason,
+        execution.error_code,
+        execution.started_at,
+        execution.completed_at,
+        CASE
+            WHEN execution.completed_at IS NULL THEN NULL
+            ELSE GREATEST(
+                0,
+                round(extract(epoch FROM (
+                    execution.completed_at - execution.started_at
+                )) * 1000)::bigint
+            )
+        END AS duration_ms,
+        (SELECT count(*) FROM control.spans span
+         WHERE span.execution_id = execution.id) AS span_count,
+        COALESCE((SELECT sum(usage.total_tokens)
+                  FROM control.usage_records usage
+                  WHERE usage.execution_id = execution.id), 0) AS total_tokens,
+        COALESCE((SELECT sum(usage.cost_amount)
+                  FROM control.usage_records usage
+                  WHERE usage.execution_id = execution.id), 0) AS total_cost
+    FROM control.executions execution
+"""
+
+_RECENT_EXECUTIONS_QUERY = text(
+    _EXECUTION_SUMMARY_SELECT
+    + """
+    WHERE execution.project_id = :project_id
+    ORDER BY execution.started_at DESC
+    LIMIT :limit
+    """
+)
+
+_EXECUTION_DETAIL_QUERY = text(
+    _EXECUTION_SUMMARY_SELECT
+    + """
+    WHERE execution.project_id = :project_id
+      AND execution.id = :execution_id
+    """
+)
+
 
 class ExecutionRepository:
     def __init__(self, database: Database) -> None:
@@ -229,10 +280,7 @@ class ExecutionRepository:
         async with self._database.connect() as connection:
             rows = (
                 await connection.execute(
-                    self._summary_query(
-                        "WHERE execution.project_id = :project_id "
-                        "ORDER BY execution.started_at DESC LIMIT :limit"
-                    ),
+                    _RECENT_EXECUTIONS_QUERY,
                     {"project_id": project_id, "limit": limit},
                 )
             ).mappings()
@@ -247,10 +295,7 @@ class ExecutionRepository:
             summary_row = (
                 (
                     await connection.execute(
-                        self._summary_query(
-                            "WHERE execution.project_id = :project_id "
-                            "AND execution.id = :execution_id"
-                        ),
+                        _EXECUTION_DETAIL_QUERY,
                         {"project_id": project_id, "execution_id": execution_id},
                     )
                 )
@@ -293,45 +338,6 @@ class ExecutionRepository:
             **summary.model_dump(),
             spans=[SpanSummary.model_validate(dict(row)) for row in span_rows],
             usage=[UsageSummary.model_validate(dict(row)) for row in usage_rows],
-        )
-
-    @staticmethod
-    def _summary_query(where_clause: str):  # type: ignore[no-untyped-def]
-        return text(
-            f"""
-            SELECT
-                execution.id,
-                execution.status,
-                execution.requested_model,
-                execution.active_provider,
-                execution.active_model,
-                execution.is_streaming,
-                execution.input_fingerprint,
-                execution.output_fingerprint,
-                execution.final_reason,
-                execution.error_code,
-                execution.started_at,
-                execution.completed_at,
-                CASE
-                    WHEN execution.completed_at IS NULL THEN NULL
-                    ELSE GREATEST(
-                        0,
-                        round(extract(epoch FROM (
-                            execution.completed_at - execution.started_at
-                        )) * 1000)::bigint
-                    )
-                END AS duration_ms,
-                (SELECT count(*) FROM control.spans span
-                 WHERE span.execution_id = execution.id) AS span_count,
-                COALESCE((SELECT sum(usage.total_tokens)
-                          FROM control.usage_records usage
-                          WHERE usage.execution_id = execution.id), 0) AS total_tokens,
-                COALESCE((SELECT sum(usage.cost_amount)
-                          FROM control.usage_records usage
-                          WHERE usage.execution_id = execution.id), 0) AS total_cost
-            FROM control.executions execution
-            {where_clause}
-            """
         )
 
     @staticmethod

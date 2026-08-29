@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     app_env: Literal["development", "test", "staging", "production"] = "development"
     log_level: str = "INFO"
-    api_host: str = "0.0.0.0"
+    api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65535)
     cors_origins: str = "http://localhost:3000"
     database_url: str
@@ -32,6 +32,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def reject_insecure_production_defaults(self) -> "Settings":
+        if "*" in self.cors_origin_list:
+            raise ValueError(
+                "CORS_ORIGINS cannot contain a wildcard when credentials are enabled"
+            )
         if self.app_env == "production":
             if (
                 self.api_key_pepper.get_secret_value()

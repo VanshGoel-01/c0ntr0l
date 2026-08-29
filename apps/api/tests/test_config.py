@@ -17,6 +17,16 @@ def test_settings_parse_comma_separated_cors_origins() -> None:
     ]
 
 
+def test_settings_reject_wildcard_cors_with_credentials() -> None:
+    with pytest.raises(ValidationError, match="CORS_ORIGINS"):
+        Settings(
+            _env_file=None,
+            database_url="postgresql+asyncpg://user:password@localhost/database",
+            redis_url="redis://localhost:6379/0",
+            cors_origins="*",
+        )
+
+
 def test_production_rejects_development_security_defaults() -> None:
     with pytest.raises(ValidationError, match="API_KEY_PEPPER"):
         Settings(
