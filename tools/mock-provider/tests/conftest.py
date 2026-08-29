@@ -3,7 +3,6 @@ from collections.abc import AsyncIterator
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-
 from mock_provider.core.config import Settings
 from mock_provider.main import create_app
 
