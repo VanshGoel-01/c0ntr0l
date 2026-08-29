@@ -50,6 +50,25 @@ Redis supports live state, atomic budget counters, and streaming coordination.
 The dashboard and CLI expose the same control-plane data through the API.
 ```
 
+## Dashboard
+
+Start the dashboard after the API and local dependencies are running:
+
+```powershell
+cd apps/dashboard
+pnpm install
+pnpm dev
+```
+
+Open `http://localhost:3000`, select **Connect**, and enter the API URL and a
+project API key created by the local seed command. The dashboard loads execution,
+workspace, budget, incident, and trace data from authenticated API endpoints.
+Provider cards probe Ollama and the deterministic mock service at runtime.
+
+The project key is held only in browser memory. It is not written to local or
+session storage and is discarded on reload or disconnect. Incident acknowledge
+and resolve actions are project-scoped API updates persisted in PostgreSQL.
+
 ## Python Runtime Guard
 
 The SDK places the policy decision directly before a tool or model call. If

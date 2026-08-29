@@ -427,6 +427,33 @@ class RuntimeRepository:
                     evidence=evidence,
                     now=now,
                 )
+                await connection.execute(
+                    text(
+                        """
+                        INSERT INTO control.incidents (
+                            execution_id, policy_decision_id, triggering_span_id,
+                            incident_type, severity, title, evidence
+                        ) VALUES (
+                            :execution_id, :policy_decision_id, :span_id,
+                            :incident_type, 'critical', 'Model call blocked',
+                            CAST(:evidence AS jsonb)
+                        )
+                        """
+                    ),
+                    {
+                        "execution_id": execution.execution_id,
+                        "policy_decision_id": decision_id,
+                        "span_id": span_id,
+                        "incident_type": (
+                            "budget_exceeded"
+                            if assessment.blocking_policy_id
+                            else "manual_intervention"
+                        ),
+                        "evidence": json.dumps(
+                            {"reason": assessment.reason, **evidence}
+                        ),
+                    },
+                )
 
         return RuntimePreflightResult(
             execution_id=execution.execution_id,

@@ -11,6 +11,7 @@ from .chat import (
 )
 from .common import DependencyStatus, HealthStatus
 from .executions import ExecutionDetail, ExecutionSummary, SpanSummary, UsageSummary
+from .incidents import IncidentContext, IncidentStatus, IncidentStatusUpdate
 from .runtime import (
     ContinuityPacket,
     RecoveryStrategy,
@@ -50,6 +51,9 @@ __all__ = [
     "BudgetPolicyContext",
     "WorkspaceContext",
     "HealthStatus",
+    "IncidentContext",
+    "IncidentStatus",
+    "IncidentStatusUpdate",
     "MessageRole",
     "ResponseMessage",
     "SpanSummary",

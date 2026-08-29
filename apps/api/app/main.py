@@ -15,6 +15,7 @@ from app.providers.ollama import OllamaProviderClient
 from app.providers.registry import ProviderRegistry
 from app.repositories.api_keys import ApiKeyRepository
 from app.repositories.executions import ExecutionRepository
+from app.repositories.incidents import IncidentRepository
 from app.repositories.recovery import RecoveryRepository
 from app.repositories.runtime import RuntimeRepository
 from app.repositories.workspace import WorkspaceRepository
@@ -22,6 +23,7 @@ from app.services.authentication import AuthenticationService
 from app.services.chat import ChatService
 from app.services.executions import ExecutionQueryService
 from app.services.health import HealthService
+from app.services.incidents import IncidentService
 from app.services.recovery import RecoveryRunner
 from app.services.runtime import RuntimeService
 from app.services.workspace import WorkspaceService
@@ -63,6 +65,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     chat_service = ChatService(execution_repository, provider)
     execution_query_service = ExecutionQueryService(execution_repository)
     workspace_service = WorkspaceService(WorkspaceRepository(database))
+    incident_service = IncidentService(IncidentRepository(database))
     recovery_runner = RecoveryRunner(
         RecoveryRepository(database),
         provider_registry,
@@ -82,6 +85,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.chat_service = chat_service
     application.state.execution_query_service = execution_query_service
     application.state.workspace_service = workspace_service
+    application.state.incident_service = incident_service
     application.state.runtime_service = runtime_service
     try:
         yield

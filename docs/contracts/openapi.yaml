@@ -147,6 +147,83 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/incidents:
+    get:
+      tags:
+      - incidents
+      summary: List Incidents
+      operationId: listIncidents
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/IncidentStatus'
+          - type: 'null'
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IncidentContext'
+                title: Response Listincidents
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/incidents/{incident_id}:
+    patch:
+      tags:
+      - incidents
+      summary: Update Incident Status
+      operationId: updateIncidentStatus
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: incident_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Incident Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentStatusUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentContext'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/workspace:
     get:
       tags:
@@ -982,6 +1059,92 @@ components:
       - ok
       - degraded
       title: HealthStatus
+    IncidentContext:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        trace_id:
+          type: string
+          title: Trace Id
+        application_name:
+          type: string
+          title: Application Name
+        provider:
+          type: string
+          title: Provider
+        model:
+          type: string
+          title: Model
+        incident_type:
+          type: string
+          title: Incident Type
+        severity:
+          type: string
+          title: Severity
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        title:
+          type: string
+          title: Title
+        evidence:
+          additionalProperties: true
+          type: object
+          title: Evidence
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        acknowledged_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Acknowledged At
+        resolved_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Resolved At
+      type: object
+      required:
+      - id
+      - execution_id
+      - trace_id
+      - application_name
+      - provider
+      - model
+      - incident_type
+      - severity
+      - status
+      - title
+      - evidence
+      - created_at
+      - acknowledged_at
+      - resolved_at
+      title: IncidentContext
+    IncidentStatus:
+      type: string
+      enum:
+      - open
+      - acknowledged
+      - resolved
+      title: IncidentStatus
+    IncidentStatusUpdate:
+      properties:
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+      additionalProperties: false
+      type: object
+      required:
+      - status
+      title: IncidentStatusUpdate
     MessageRole:
       type: string
       enum:

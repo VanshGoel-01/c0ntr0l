@@ -24,6 +24,8 @@ def test_checked_in_contract_matches_implemented_operations() -> None:
         ("/api/v1/executions", "get"),
         ("/api/v1/executions/{execution_id}", "get"),
         ("/api/v1/workspace", "get"),
+        ("/api/v1/incidents", "get"),
+        ("/api/v1/incidents/{incident_id}", "patch"),
         ("/api/v1/runtime/executions", "post"),
         ("/api/v1/runtime/executions/{execution_id}/preflight", "post"),
         ("/api/v1/runtime/executions/{execution_id}/actions/check", "post"),
