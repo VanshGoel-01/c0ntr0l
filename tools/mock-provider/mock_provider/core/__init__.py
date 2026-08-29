@@ -1,0 +1,1 @@
+"""Core mock-provider configuration."""
