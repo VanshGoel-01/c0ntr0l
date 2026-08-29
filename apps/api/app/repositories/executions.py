@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from control_schemas import (
@@ -13,6 +14,10 @@ from sqlalchemy import text
 from app.domain.auth import ApiKeyPrincipal
 from app.domain.executions import ExecutionTrace
 from app.infrastructure.database import Database
+from app.repositories.budget_reservations import (
+    claim_budget_reservations,
+    reconcile_budget_reservations,
+)
 
 _EXECUTION_SUMMARY_SELECT = """
     SELECT
@@ -174,6 +179,7 @@ class ExecutionRepository:
                     ).scalar_one()
                 )
             )
+            await claim_budget_reservations(connection, execution_id)
         return ExecutionTrace(
             execution_id=execution_id,
             root_span_id=root_span_id,
@@ -246,6 +252,13 @@ class ExecutionRepository:
                     "latency_ms": latency_ms,
                 },
             )
+            await reconcile_budget_reservations(
+                connection,
+                trace.execution_id,
+                actual_tokens=completion.usage.total_tokens,
+                actual_cost=Decimal("0"),
+                now=now,
+            )
 
     async def fail(
         self,
@@ -271,6 +284,13 @@ class ExecutionRepository:
                     "completed_at": now,
                     "error_code": error_code,
                 },
+            )
+            await reconcile_budget_reservations(
+                connection,
+                trace.execution_id,
+                actual_tokens=0,
+                actual_cost=Decimal("0"),
+                now=now,
             )
             await self._finish_span(
                 connection,

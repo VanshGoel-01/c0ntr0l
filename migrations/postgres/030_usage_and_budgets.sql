@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS control.budget_reservations (
     status text NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'reconciled', 'released', 'expired')),
     reserved_requests bigint NOT NULL DEFAULT 0 CHECK (reserved_requests >= 0),
+    claimed_requests bigint NOT NULL DEFAULT 0 CHECK (claimed_requests >= 0),
     reserved_tokens bigint NOT NULL DEFAULT 0 CHECK (reserved_tokens >= 0),
     reserved_cost numeric(18, 8) NOT NULL DEFAULT 0 CHECK (reserved_cost >= 0),
     actual_requests bigint CHECK (actual_requests IS NULL OR actual_requests >= 0),

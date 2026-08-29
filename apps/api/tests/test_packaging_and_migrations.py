@@ -35,3 +35,11 @@ def test_runtime_recovery_schema_preserves_checkpoint_and_audit_history() -> Non
     assert "CREATE TABLE IF NOT EXISTS control.continuity_checkpoints" in recovery_schema
     assert "CREATE TABLE IF NOT EXISTS control.recovery_attempts" in recovery_schema
     assert "raw provider context are forbidden" in recovery_schema
+
+
+def test_budget_reservations_track_claimed_provider_requests() -> None:
+    reservation_schema = (
+        ROOT / "migrations" / "postgres" / "080_budget_reservation_claims.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "ADD COLUMN IF NOT EXISTS claimed_requests" in reservation_schema

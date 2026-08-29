@@ -1189,7 +1189,11 @@ class RuntimeRepository:
                           )
                     ) consumption ON true
                     LEFT JOIN LATERAL (
-                        SELECT COALESCE(sum(reserved.reserved_requests), 0) AS requests,
+                        SELECT COALESCE(sum(GREATEST(
+                                   reserved.reserved_requests
+                                     - reserved.claimed_requests,
+                                   0
+                               )), 0) AS requests,
                                COALESCE(sum(reserved.reserved_tokens), 0) AS tokens,
                                COALESCE(sum(reserved.reserved_cost), 0) AS cost
                         FROM control.budget_reservations reserved
@@ -1280,12 +1284,58 @@ class RuntimeRepository:
                     )
                     ON CONFLICT (budget_policy_id, execution_id) DO UPDATE
                     SET status = 'active',
-                        reserved_requests =
-                            budget_reservations.reserved_requests + 1,
-                        reserved_tokens =
-                            budget_reservations.reserved_tokens + EXCLUDED.reserved_tokens,
-                        reserved_cost =
-                            budget_reservations.reserved_cost + EXCLUDED.reserved_cost,
+                        reserved_requests = CASE
+                            WHEN budget_reservations.status = 'active'
+                             AND budget_reservations.expires_at > :now
+                            THEN budget_reservations.reserved_requests + 1
+                            ELSE 1
+                        END,
+                        claimed_requests = CASE
+                            WHEN budget_reservations.status = 'active'
+                             AND budget_reservations.expires_at > :now
+                            THEN budget_reservations.claimed_requests
+                            ELSE 0
+                        END,
+                        reserved_tokens = CASE
+                            WHEN budget_reservations.status = 'active'
+                             AND budget_reservations.expires_at > :now
+                            THEN budget_reservations.reserved_tokens
+                                 + EXCLUDED.reserved_tokens
+                            ELSE EXCLUDED.reserved_tokens
+                        END,
+                        reserved_cost = CASE
+                            WHEN budget_reservations.status = 'active'
+                             AND budget_reservations.expires_at > :now
+                            THEN budget_reservations.reserved_cost
+                                 + EXCLUDED.reserved_cost
+                            ELSE EXCLUDED.reserved_cost
+                        END,
+                        actual_requests = CASE
+                            WHEN budget_reservations.status = 'active'
+                             AND budget_reservations.expires_at > :now
+                            THEN COALESCE(
+                                budget_reservations.actual_requests, 0
+                            )
+                            ELSE 0
+                        END,
+                        actual_tokens = CASE
+                            WHEN budget_reservations.status = 'active'
+                             AND budget_reservations.expires_at > :now
+                            THEN budget_reservations.actual_tokens
+                            ELSE NULL
+                        END,
+                        actual_cost = CASE
+                            WHEN budget_reservations.status = 'active'
+                             AND budget_reservations.expires_at > :now
+                            THEN budget_reservations.actual_cost
+                            ELSE NULL
+                        END,
+                        created_at = CASE
+                            WHEN budget_reservations.status = 'active'
+                             AND budget_reservations.expires_at > :now
+                            THEN budget_reservations.created_at
+                            ELSE :now
+                        END,
                         expires_at = EXCLUDED.expires_at,
                         reconciled_at = NULL
                     """

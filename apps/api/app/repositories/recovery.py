@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
 from control_schemas import ChatCompletion
@@ -7,6 +8,10 @@ from sqlalchemy import text
 
 from app.domain.recovery import RecoveryTrace
 from app.infrastructure.database import Database
+from app.repositories.budget_reservations import (
+    claim_budget_reservations,
+    reconcile_budget_reservations,
+)
 
 
 class RecoveryExecutionNotActiveError(Exception):
@@ -105,6 +110,7 @@ class RecoveryRepository:
                     ).scalar_one()
                 )
             )
+            await claim_budget_reservations(connection, execution_id)
         return RecoveryTrace(
             execution_id=execution_id,
             root_span_id=UUID(str(execution["root_span_id"])),
@@ -188,6 +194,13 @@ class RecoveryRepository:
                     "latency_ms": latency_ms,
                 },
             )
+            await reconcile_budget_reservations(
+                connection,
+                trace.execution_id,
+                actual_tokens=completion.usage.total_tokens,
+                actual_cost=Decimal("0"),
+                now=now,
+            )
             await connection.execute(
                 text(
                     """
@@ -209,7 +222,6 @@ class RecoveryRepository:
                     ),
                 },
             )
-
     async def fail(
         self,
         trace: RecoveryTrace,
@@ -284,6 +296,13 @@ class RecoveryRepository:
                     "now": now,
                     "details": json.dumps({"error_code": error_code}),
                 },
+            )
+            await reconcile_budget_reservations(
+                connection,
+                trace.execution_id,
+                actual_tokens=0,
+                actual_cost=Decimal("0"),
+                now=now,
             )
 
     @staticmethod
