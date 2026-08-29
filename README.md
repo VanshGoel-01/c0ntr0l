@@ -25,8 +25,7 @@ tests/                     Unit, integration, end-to-end, and scenario tests
 deploy/                    Docker Compose and environment setup
 scripts/                   Seed, reset, validation, and demo scripts
 migrations/                Database migrations
-docs/contracts/            API and event contracts shared by every workstream
-handoffs/templates/        Files used when transferring a Codex-generated module
+docs/contracts/            Shared API contracts
 ```
 
 ## Branches
@@ -37,5 +36,3 @@ handoffs/templates/        Files used when transferring a Codex-generated module
 - `feat/dashboard`: UI design and frontend implementation.
 - `feat/test-scenarios`: mock failures, fixtures, and automated tests.
 - `feat/infra-providers`: Docker, CI, CLI, provider adapters, and failover support.
-
-See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) before committing.
