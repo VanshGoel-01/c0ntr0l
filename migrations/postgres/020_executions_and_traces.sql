@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS control.executions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    request_id text NOT NULL UNIQUE,
+    request_id text NOT NULL,
     organization_id uuid NOT NULL
         REFERENCES control.organizations(id) ON DELETE RESTRICT,
     project_id uuid NOT NULL REFERENCES control.projects(id) ON DELETE RESTRICT,
