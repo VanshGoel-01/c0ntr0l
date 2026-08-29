@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "c0ntr0l-sdk"
+version = "0.1.0"
+description = "Python runtime guard SDK for c0ntr0l"
+requires-python = ">=3.11"
+dependencies = [
+    "c0ntr0l-schemas==0.1.0",
+    "httpx>=0.28,<1",
+    "pydantic>=2.10,<3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

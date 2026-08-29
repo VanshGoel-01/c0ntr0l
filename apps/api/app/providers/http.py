@@ -59,3 +59,6 @@ class HttpProviderClient:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+    async def context_window(self, model: str) -> int | None:
+        return None

@@ -24,7 +24,14 @@ class Settings(BaseSettings):
     database_url: str
     redis_url: str
     provider_base_url: str = "http://127.0.0.1:8002"
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_timeout_seconds: float = Field(default=60.0, ge=1, le=300)
     provider_timeout_seconds: float = Field(default=10.0, ge=0.1, le=120.0)
+    recovery_max_tokens: int = Field(default=128, ge=32, le=4096)
+    default_context_window_tokens: int = Field(default=8_192, ge=512)
+    mock_context_window_tokens: int = Field(default=8_192, ge=512)
+    context_safety_margin_tokens: int = Field(default=256, ge=0, le=8_192)
+    context_warning_utilization: float = Field(default=0.85, ge=0.5, le=1)
     api_key_pepper: SecretStr = SecretStr("local-development-only-change-me")
     allow_demo_scenarios: bool = True
     service_name: str = "c0ntr0l-api"

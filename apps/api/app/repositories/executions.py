@@ -17,6 +17,13 @@ from app.infrastructure.database import Database
 _EXECUTION_SUMMARY_SELECT = """
     SELECT
         execution.id,
+        execution.request_id,
+        execution.project_id,
+        project.name AS project_name,
+        execution.application_id,
+        application.name AS application_name,
+        execution.agent_id,
+        agent.name AS agent_name,
         execution.status,
         execution.requested_model,
         execution.active_provider,
@@ -45,7 +52,11 @@ _EXECUTION_SUMMARY_SELECT = """
         COALESCE((SELECT sum(usage.cost_amount)
                   FROM control.usage_records usage
                   WHERE usage.execution_id = execution.id), 0) AS total_cost
+        , execution.metadata
     FROM control.executions execution
+    JOIN control.projects project ON project.id = execution.project_id
+    LEFT JOIN control.applications application ON application.id = execution.application_id
+    LEFT JOIN control.agents agent ON agent.id = execution.agent_id
 """
 
 _RECENT_EXECUTIONS_QUERY = text(
@@ -77,6 +88,8 @@ class ExecutionRepository:
         is_streaming: bool,
         request_id: str,
         input_fingerprint: str,
+        application_slug: str | None = None,
+        agent_slug: str | None = None,
     ) -> ExecutionTrace:
         async with self._database.begin() as connection:
             execution_id = UUID(
@@ -86,11 +99,24 @@ class ExecutionRepository:
                             text(
                                 """
                                 INSERT INTO control.executions (
-                                    request_id, organization_id, project_id, status,
+                                    request_id, organization_id, project_id,
+                                    application_id, agent_id, status,
                                     requested_model, active_provider, active_model,
                                     is_streaming, input_fingerprint
                                 ) VALUES (
-                                    :request_id, :organization_id, :project_id, 'running',
+                                    :request_id, :organization_id, :project_id,
+                                    (SELECT id FROM control.applications
+                                     WHERE project_id = :project_id
+                                       AND slug = :application_slug
+                                       AND status = 'active'),
+                                    (SELECT agent.id FROM control.agents agent
+                                     JOIN control.applications application
+                                       ON application.id = agent.application_id
+                                     WHERE application.project_id = :project_id
+                                       AND application.slug = :application_slug
+                                       AND agent.slug = :agent_slug
+                                       AND agent.status = 'active'),
+                                    'running',
                                     :model, 'mock', :model, :is_streaming, :input_fingerprint
                                 )
                                 RETURNING id
@@ -103,6 +129,8 @@ class ExecutionRepository:
                                 "model": requested_model,
                                 "is_streaming": is_streaming,
                                 "input_fingerprint": input_fingerprint,
+                                "application_slug": application_slug,
+                                "agent_slug": agent_slug,
                             },
                         )
                     ).scalar_one()
@@ -308,8 +336,9 @@ class ExecutionRepository:
                 await connection.execute(
                     text(
                         """
-                        SELECT id, sequence_no, kind, name, status, duration_ms,
-                               error_code, started_at, completed_at
+                        SELECT id, parent_span_id, sequence_no, kind, name, tool_name,
+                               status, duration_ms, error_code, started_at, completed_at,
+                               attributes
                         FROM control.spans
                         WHERE execution_id = :execution_id
                         ORDER BY sequence_no

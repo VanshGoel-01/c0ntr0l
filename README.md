@@ -18,6 +18,7 @@ c0ntr0l is a runtime safety and observability layer for AI applications and agen
 apps/api/                 FastAPI gateway and control plane
 apps/dashboard/           Next.js operational dashboard
 apps/cli/                 Typer and Rich command-line client
+packages/sdk-python/      Python guard SDK for tool and model calls
 packages/schemas/         Shared request, event, policy, and handoff contracts
 packages/providers/       Mock, Ollama, and optional cloud provider adapters
 tools/mock-provider/      Deterministic provider used by demos and tests
@@ -48,6 +49,74 @@ PostgreSQL stores durable execution, usage, policy, and incident records.
 Redis supports live state, atomic budget counters, and streaming coordination.
 The dashboard and CLI expose the same control-plane data through the API.
 ```
+
+## Python Runtime Guard
+
+The SDK places the policy decision directly before a tool or model call. If
+c0ntr0l returns `block` or `cancel`, the handler is never invoked.
+
+```python
+from control_schemas import RuntimeExecutionRequest, RuntimePreflightRequest
+from control_sdk import ControlRuntimeClient, ControlledExecution
+
+async with ControlRuntimeClient(
+    base_url="http://localhost:8000",
+    api_key="<project-api-key>",
+) as client:
+    execution = await ControlledExecution.start(
+        client,
+        RuntimeExecutionRequest(task="Research watersheds", model="qwen2.5:0.5b"),
+    )
+    result = await execution.run_tool(
+        name="search",
+        arguments={"query": query},
+        handler=lambda: search(query),
+        progress=lambda output: bool(output["items"]),
+        summary=lambda output: f"Found {len(output['items'])} sources",
+    )
+```
+
+Model calls can reserve output capacity and enforce context and budget policy
+before the provider handler runs:
+
+```python
+result = await execution.run_model(
+    name="chat.completion",
+    arguments={"model": "gemma3:1b"},
+    handler=lambda: call_local_model(messages),
+    progress=True,
+    preflight=RuntimePreflightRequest(
+        input_tokens=estimated_input_tokens,
+        requested_output_tokens=512,
+    ),
+)
+```
+
+The server resolves active Ollama context metadata when available, otherwise it
+uses provider-specific configuration. It projects the request across active
+organization, project, user, application, and agent budgets. Enforce-mode
+violations create a checkpoint and prevent the model handler from running.
+
+Run the local no-progress loop demonstration without calling a paid model:
+
+```powershell
+$env:PYTHONPATH = "packages/sdk-python/src;packages/schemas/src"
+$env:CONTROL_API_KEY = "<local-project-api-key>"
+.\.venv\Scripts\python.exe scripts/demo_runtime_guard.py
+```
+
+Automatic recovery currently supports only configured local providers:
+
+- `retry_modified` requires changed arguments and immediately executes the linked
+  run through the source provider.
+- `model_handoff` immediately executes the verified continuity packet through a
+  different `mock` or `ollama` target.
+- `manual_resume` prepares the linked execution without calling a provider.
+- `stop` keeps the source execution stopped and preserves its checkpoint.
+
+Completed recoveries record a provider span, provider attempt, usage, output
+fingerprint, and source-to-resumed execution relationship. Raw model output is
+returned to the calling application but is not stored in execution metadata.
 
 Each request receives an execution identity and trace before it reaches a model.
 Deterministic policies evaluate budgets and repeated operations, while provider

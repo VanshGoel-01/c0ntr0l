@@ -36,6 +36,8 @@ class ChatService:
         request: ChatRequest,
         request_id: str | None,
         demo_scenario: str | None,
+        application_slug: str | None = None,
+        agent_slug: str | None = None,
     ) -> ChatResult:
         if request.stream:
             raise StreamingNotImplementedError
@@ -48,6 +50,8 @@ class ChatService:
             request.stream,
             resolved_request_id,
             input_fingerprint,
+            application_slug,
+            agent_slug,
         )
         started_at = time.perf_counter()
         try:

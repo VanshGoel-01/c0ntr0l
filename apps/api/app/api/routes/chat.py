@@ -23,6 +23,14 @@ DemoScenarioHeader = Annotated[
     str | None,
     Header(alias="X-Control-Demo-Scenario", min_length=1, max_length=32),
 ]
+ApplicationHeader = Annotated[
+    str | None,
+    Header(alias="X-Control-Application", min_length=1, max_length=63),
+]
+AgentHeader = Annotated[
+    str | None,
+    Header(alias="X-Control-Agent", min_length=1, max_length=63),
+]
 
 
 @router.post(
@@ -38,6 +46,8 @@ async def create_chat_completion(
     service: ChatServiceDependency,
     request_id: RequestIdHeader = None,
     demo_scenario: DemoScenarioHeader = None,
+    application_slug: ApplicationHeader = None,
+    agent_slug: AgentHeader = None,
 ) -> ChatCompletion:
     settings = request.app.state.settings
     if demo_scenario is not None and not settings.allow_demo_scenarios:
@@ -51,6 +61,8 @@ async def create_chat_completion(
             body,
             request_id=request_id,
             demo_scenario=demo_scenario,
+            application_slug=application_slug,
+            agent_slug=agent_slug,
         )
     except StreamingNotImplementedError as exc:
         raise HTTPException(

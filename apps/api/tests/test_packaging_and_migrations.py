@@ -25,3 +25,13 @@ def test_request_ids_are_correlation_values_not_global_unique_keys() -> None:
         compatibility_migration
     )
     assert "ON control.executions (project_id, request_id)" in compatibility_migration
+
+
+def test_runtime_recovery_schema_preserves_checkpoint_and_audit_history() -> None:
+    recovery_schema = (
+        ROOT / "migrations" / "postgres" / "070_runtime_recovery.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS control.continuity_checkpoints" in recovery_schema
+    assert "CREATE TABLE IF NOT EXISTS control.recovery_attempts" in recovery_schema
+    assert "raw provider context are forbidden" in recovery_schema

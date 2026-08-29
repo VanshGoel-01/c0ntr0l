@@ -23,6 +23,17 @@ def test_checked_in_contract_matches_implemented_operations() -> None:
         ("/v1/chat/completions", "post"),
         ("/api/v1/executions", "get"),
         ("/api/v1/executions/{execution_id}", "get"),
+        ("/api/v1/workspace", "get"),
+        ("/api/v1/runtime/executions", "post"),
+        ("/api/v1/runtime/executions/{execution_id}/preflight", "post"),
+        ("/api/v1/runtime/executions/{execution_id}/actions/check", "post"),
+        (
+            "/api/v1/runtime/executions/{execution_id}/actions/{action_id}/complete",
+            "post",
+        ),
+        ("/api/v1/runtime/executions/{execution_id}/intervention", "get"),
+        ("/api/v1/runtime/executions/{execution_id}/cancel", "post"),
+        ("/api/v1/runtime/executions/{execution_id}/recover", "post"),
     }
     assert {
         (path, method)
@@ -46,4 +57,9 @@ def test_contract_documents_authentication_and_current_streaming_default() -> No
         ]
         is False
     )
-    assert "/api/v1/executions/{execution_id}/cancel" not in contract["paths"]
+    assert (
+        contract["paths"][
+            "/api/v1/runtime/executions/{execution_id}/actions/check"
+        ]["post"]["operationId"]
+        == "checkRuntimeAction"
+    )
