@@ -1,0 +1,108 @@
+openapi: 3.1.0
+info:
+  title: c0ntr0l API
+  version: 0.1.0
+  description: Shared hackathon contract for the gateway, dashboard, CLI, and tests.
+servers:
+  - url: http://localhost:8000
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service health
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded]
+  /v1/chat/completions:
+    post:
+      operationId: createChatCompletion
+      parameters:
+        - in: header
+          name: X-Control-Project-Id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Control-User-Id
+          required: false
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Streaming or complete provider response
+        "402":
+          description: Budget policy rejected the operation
+        "409":
+          description: Execution stopped by policy
+  /api/v1/executions:
+    get:
+      operationId: listExecutions
+      responses:
+        "200":
+          description: Recent executions
+  /api/v1/executions/{execution_id}:
+    get:
+      operationId: getExecution
+      parameters:
+        - in: path
+          name: execution_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Execution with spans, usage, and policy evidence
+  /api/v1/executions/{execution_id}/cancel:
+    post:
+      operationId: cancelExecution
+      parameters:
+        - in: path
+          name: execution_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Cancellation requested
+components:
+  schemas:
+    ChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type: string
+    ChatRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        stream:
+          type: boolean
+          default: true
+        max_tokens:
+          type: integer
+          minimum: 1
+
