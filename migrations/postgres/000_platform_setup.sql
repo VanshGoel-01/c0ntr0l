@@ -1,0 +1,7 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE SCHEMA IF NOT EXISTS control AUTHORIZATION CURRENT_USER;
+CREATE SCHEMA IF NOT EXISTS audit AUTHORIZATION CURRENT_USER;
+
+COMMENT ON SCHEMA control IS 'Durable c0ntr0l application data';
+COMMENT ON SCHEMA audit IS 'Append-only policy and operator audit records';
