@@ -28,11 +28,29 @@ migrations/                Database migrations
 docs/contracts/            Shared API contracts
 ```
 
-## Branches
+## Architecture
 
-- `main`: review-ready and demoable checkpoints only.
-- `integration`: combined team work after verification.
-- `feat/core-gateway`: gateway, schemas, policies, and backend integration.
-- `feat/dashboard`: UI design and frontend implementation.
-- `feat/test-scenarios`: mock failures, fixtures, and automated tests.
-- `feat/infra-providers`: Docker, CI, CLI, provider adapters, and failover support.
+```text
+AI application or agent
+          |
+          v
+  c0ntr0l API gateway
+          |
+          +---- identity and execution tracing
+          +---- budget and safety policies
+          +---- loop detection and intervention
+          +---- provider routing and failover
+          |
+          v
+   AI model providers
+
+PostgreSQL stores durable execution, usage, policy, and incident records.
+Redis supports live state, atomic budget counters, and streaming coordination.
+The dashboard and CLI expose the same control-plane data through the API.
+```
+
+Each request receives an execution identity and trace before it reaches a model.
+Deterministic policies evaluate budgets and repeated operations, while provider
+adapters normalize model responses and usage data. If a provider becomes
+unavailable, an approved handoff can summarize the active context and continue
+through another compatible provider without making the safety decision itself.
