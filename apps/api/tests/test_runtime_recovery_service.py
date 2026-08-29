@@ -26,8 +26,8 @@ class FakeSignals:
     def __init__(self) -> None:
         self.cleared = []
 
-    async def clear_cancellation(self, execution_id):  # type: ignore[no-untyped-def]
-        self.cleared.append(execution_id)
+    async def clear_cancellation(self, project_id, execution_id):  # type: ignore[no-untyped-def]
+        self.cleared.append((project_id, execution_id))
 
 
 class FakeRunner:
@@ -67,7 +67,7 @@ async def test_automatic_recovery_runs_provider_after_preparation() -> None:
 
     assert result.status == "completed"
     assert len(runner.calls) == 1
-    assert signals.cleared == [prepared.resumed_execution_id]
+    assert signals.cleared == [(PRINCIPAL.project_id, prepared.resumed_execution_id)]
 
 
 @pytest.mark.asyncio

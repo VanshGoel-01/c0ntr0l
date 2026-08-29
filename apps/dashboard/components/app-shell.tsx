@@ -54,7 +54,7 @@ export function AppShell() {
     if (activeView === "runs") return <RunsView cancelExecution={data.cancelExecution} executions={executions} loadExecution={data.loadExecution} loadIntervention={data.loadIntervention} onSelectionHandled={() => setRequestedExecution(null)} recoverExecution={data.recoverExecution} requestedExecution={requestedExecution} settings={consoleState.settings} />;
     if (activeView === "budgets") return <BudgetsView executions={executions} modelPolicies={modelState.policies} workspace={data.workspace} />;
     if (activeView === "incidents") return <IncidentsView executions={executions} incidents={incidents} onOpenRun={openRun} onStatus={data.updateIncidentStatus} />;
-    if (activeView === "models") return <ModelsView executions={executions} onLimit={modelState.updateLimit} onMode={modelState.updateMode} policies={modelState.policies} />;
+    if (activeView === "models") return <ModelsView connection={data.connection} executions={executions} onLimit={modelState.updateLimit} onMode={modelState.updateMode} policies={modelState.policies} />;
     if (activeView === "settings") return <SettingsView connection={data.connection} health={data.health} mode={data.mode} onConnection={() => setConnectionOpen(true)} onUpdate={consoleState.update} settings={consoleState.settings} />;
     return <ProfileView connection={data.connection} mode={data.mode} onDisconnect={data.disconnect} workspace={data.workspace} />;
   }

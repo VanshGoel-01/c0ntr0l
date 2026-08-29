@@ -5,10 +5,10 @@ import { RefreshCw, ShieldCheck } from "lucide-react";
 import { ModelLogo } from "@/components/model-logo";
 import { useProviderStatus } from "@/hooks/use-provider-status";
 import { deriveModelStats, formatDuration, formatTokens } from "@/lib/metrics";
-import type { Execution, ModelPolicy, PolicyMode } from "@/lib/types";
+import type { ConnectionConfig, Execution, ModelPolicy, PolicyMode } from "@/lib/types";
 
-export function ModelsView({ executions, policies, onMode, onLimit }: { executions: Execution[]; policies: Record<string, ModelPolicy>; onMode: (key: string, mode: PolicyMode) => void; onLimit: (key: string, limit: number | null) => void }) {
-  const { status, loading, refresh } = useProviderStatus();
+export function ModelsView({ connection, executions, policies, onMode, onLimit }: { connection: ConnectionConfig | null; executions: Execution[]; policies: Record<string, ModelPolicy>; onMode: (key: string, mode: PolicyMode) => void; onLimit: (key: string, limit: number | null) => void }) {
+  const { status, loading, refresh } = useProviderStatus(connection);
   const models = deriveModelStats(executions);
   const providerCards = [
     { name: "Ollama", state: status?.ollama.status === "connected" ? "Operational" : "Offline", detail: status?.ollama.status === "connected" ? `${status.ollama.models.length} installed` : "Local service unavailable" },

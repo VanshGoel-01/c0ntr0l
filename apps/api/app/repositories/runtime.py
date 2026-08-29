@@ -29,6 +29,7 @@ from app.domain.preflight import (
     BudgetSnapshot,
     PreflightAssessment,
     PreflightExecution,
+    evaluate_preflight,
 )
 from app.domain.runtime import (
     ActionHistoryItem,
@@ -61,6 +62,28 @@ class RuntimeRecoveryError(Exception):
 class RuntimeRepository:
     def __init__(self, database: Database) -> None:
         self._database = database
+
+    async def authorize_execution(
+        self, principal: ApiKeyPrincipal, execution_id: UUID
+    ) -> None:
+        async with self._database.connect() as connection:
+            authorized = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT 1
+                        FROM control.executions
+                        WHERE id = :execution_id AND project_id = :project_id
+                        """
+                    ),
+                    {
+                        "execution_id": execution_id,
+                        "project_id": principal.project_id,
+                    },
+                )
+            ).scalar_one_or_none()
+        if authorized is None:
+            raise RuntimeExecutionNotFoundError
 
     async def start(
         self,
@@ -149,11 +172,11 @@ class RuntimeRepository:
             policy_mode=request.policy_mode,
         )
 
-    async def get_preflight_snapshot(
+    async def get_preflight_execution(
         self,
         principal: ApiKeyPrincipal,
         execution_id: UUID,
-    ) -> tuple[PreflightExecution, list[BudgetSnapshot]]:
+    ) -> PreflightExecution:
         async with self._database.connect() as connection:
             execution = (
                 await connection.execute(
@@ -177,104 +200,10 @@ class RuntimeRepository:
             if execution["status"] != "running":
                 raise RuntimeExecutionNotActiveError(execution["status"])
 
-            budget_rows = (
-                await connection.execute(
-                    text(
-                        """
-                        SELECT policy.id, policy.name, policy.scope_type,
-                               policy.period_type, policy.mode,
-                               policy.max_requests, policy.max_tokens,
-                               policy.max_cost,
-                               COALESCE(consumption.requests, 0) AS consumed_requests,
-                               COALESCE(consumption.tokens, 0) AS consumed_tokens,
-                               COALESCE(consumption.cost, 0) AS consumed_cost
-                        FROM control.budget_policies policy
-                        LEFT JOIN LATERAL (
-                            SELECT count(DISTINCT attempt.id) AS requests,
-                                   COALESCE(sum(usage.total_tokens), 0) AS tokens,
-                                   COALESCE(sum(usage.cost_amount), 0) AS cost
-                            FROM control.executions consumed
-                            LEFT JOIN control.provider_attempts attempt
-                              ON attempt.execution_id = consumed.id
-                            LEFT JOIN control.usage_records usage
-                              ON usage.provider_attempt_id = attempt.id
-                            WHERE (
-                                (policy.scope_type = 'organization'
-                                 AND consumed.organization_id = policy.scope_id)
-                                OR (policy.scope_type = 'project'
-                                    AND consumed.project_id = policy.scope_id)
-                                OR (policy.scope_type = 'user'
-                                    AND consumed.user_id = policy.scope_id)
-                                OR (policy.scope_type = 'application'
-                                    AND consumed.application_id = policy.scope_id)
-                                OR (policy.scope_type = 'agent'
-                                    AND consumed.agent_id = policy.scope_id)
-                            )
-                              AND consumed.started_at >= policy.starts_at
-                              AND (
-                                  policy.period_type = 'execution'
-                                  AND consumed.id = :execution_id
-                                  OR policy.period_type = 'daily'
-                                  AND consumed.started_at >= date_trunc('day', now())
-                                  OR policy.period_type = 'monthly'
-                                  AND consumed.started_at >= date_trunc('month', now())
-                                  OR policy.period_type = 'rolling'
-                                  AND consumed.started_at >= now() - make_interval(
-                                      secs => policy.window_seconds
-                                  )
-                              )
-                        ) consumption ON true
-                        WHERE policy.is_enabled
-                          AND policy.starts_at <= now()
-                          AND (policy.ends_at IS NULL OR policy.ends_at > now())
-                          AND (
-                              (policy.scope_type = 'organization'
-                               AND policy.scope_id = :organization_id)
-                              OR (policy.scope_type = 'project'
-                                  AND policy.scope_id = :project_id)
-                              OR (policy.scope_type = 'user'
-                                  AND policy.scope_id = :user_id)
-                              OR (policy.scope_type = 'application'
-                                  AND policy.scope_id = :application_id)
-                              OR (policy.scope_type = 'agent'
-                                  AND policy.scope_id = :agent_id)
-                          )
-                        ORDER BY policy.scope_type, policy.name
-                        """
-                    ),
-                    {
-                        "execution_id": execution_id,
-                        "organization_id": execution["organization_id"],
-                        "project_id": execution["project_id"],
-                        "user_id": execution["user_id"],
-                        "application_id": execution["application_id"],
-                        "agent_id": execution["agent_id"],
-                    },
-                )
-            ).mappings().all()
-
-        return (
-            PreflightExecution(
-                execution_id=execution_id,
-                provider=execution["active_provider"] or "custom",
-                model=execution["active_model"] or execution["requested_model"],
-            ),
-            [
-                BudgetSnapshot(
-                    policy_id=row["id"],
-                    name=row["name"],
-                    scope_type=row["scope_type"],
-                    period_type=row["period_type"],
-                    mode=RuntimePolicyMode(row["mode"]),
-                    consumed_requests=int(row["consumed_requests"]),
-                    consumed_tokens=int(row["consumed_tokens"]),
-                    consumed_cost=row["consumed_cost"],
-                    max_requests=row["max_requests"],
-                    max_tokens=row["max_tokens"],
-                    max_cost=row["max_cost"],
-                )
-                for row in budget_rows
-            ],
+        return PreflightExecution(
+            execution_id=execution_id,
+            provider=execution["active_provider"] or "custom",
+            model=execution["active_model"] or execution["requested_model"],
         )
 
     async def record_preflight(
@@ -282,32 +211,58 @@ class RuntimeRepository:
         principal: ApiKeyPrincipal,
         execution: PreflightExecution,
         request: RuntimePreflightRequest,
-        assessment: PreflightAssessment,
         *,
         context_window_tokens: int,
         safety_margin_tokens: int,
+        warning_utilization: float,
     ) -> RuntimePreflightResult:
         checkpoint_id: UUID | None = None
-        evidence = {
-            "input_tokens": request.input_tokens,
-            "reserved_output_tokens": request.requested_output_tokens,
-            "safety_margin_tokens": safety_margin_tokens,
-            "projected_context_tokens": assessment.projected_context_tokens,
-            "context_window_tokens": context_window_tokens,
-            "context_remaining_tokens": assessment.context_remaining_tokens,
-            "context_utilization": assessment.context_utilization,
-            "budgets": [
-                budget.model_dump(mode="json") for budget in assessment.budgets
-            ],
-        }
         async with self._database.begin() as connection:
             locked = await self._locked_execution(
                 connection, principal.project_id, execution.execution_id
             )
             if locked["status"] != "running":
                 raise RuntimeExecutionNotActiveError(locked["status"])
+            # Keep the budget snapshot and reservation atomic across the organization.
+            await connection.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock("
+                    "hashtextextended(CAST(:organization_id AS text), 0))"
+                ),
+                {"organization_id": str(principal.organization_id)},
+            )
+            budgets = await self._preflight_budget_snapshots(
+                connection, locked, execution.execution_id
+            )
+            assessment = evaluate_preflight(
+                request,
+                budgets,
+                context_window_tokens=context_window_tokens,
+                safety_margin_tokens=safety_margin_tokens,
+                warning_utilization=warning_utilization,
+            )
+            evidence = {
+                "input_tokens": request.input_tokens,
+                "reserved_output_tokens": request.requested_output_tokens,
+                "safety_margin_tokens": safety_margin_tokens,
+                "projected_context_tokens": assessment.projected_context_tokens,
+                "context_window_tokens": context_window_tokens,
+                "context_remaining_tokens": assessment.context_remaining_tokens,
+                "context_utilization": assessment.context_utilization,
+                "budgets": [
+                    budget.model_dump(mode="json") for budget in assessment.budgets
+                ],
+            }
             now = await self._database_now(connection)
             blocked = assessment.decision is RuntimeDecision.BLOCK
+            if not blocked:
+                await self._reserve_preflight_budget(
+                    connection,
+                    execution.execution_id,
+                    assessment,
+                    request,
+                    now,
+                )
             span_id = UUID(
                 str(
                     (
@@ -1176,6 +1131,173 @@ class RuntimeRepository:
         if row is None:
             raise RuntimeExecutionNotFoundError
         return row
+
+    async def _preflight_budget_snapshots(
+        self, connection, execution, execution_id: UUID  # type: ignore[no-untyped-def]
+    ) -> list[BudgetSnapshot]:
+        rows = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT policy.id, policy.name, policy.scope_type,
+                           policy.period_type, policy.mode,
+                           policy.max_requests, policy.max_tokens,
+                           policy.max_cost,
+                           COALESCE(consumption.requests, 0)
+                             + COALESCE(reservations.requests, 0)
+                               AS consumed_requests,
+                           COALESCE(consumption.tokens, 0)
+                             + COALESCE(reservations.tokens, 0)
+                               AS consumed_tokens,
+                           COALESCE(consumption.cost, 0)
+                             + COALESCE(reservations.cost, 0)
+                               AS consumed_cost
+                    FROM control.budget_policies policy
+                    LEFT JOIN LATERAL (
+                        SELECT count(DISTINCT attempt.id) AS requests,
+                               COALESCE(sum(usage.total_tokens), 0) AS tokens,
+                               COALESCE(sum(usage.cost_amount), 0) AS cost
+                        FROM control.executions consumed
+                        LEFT JOIN control.provider_attempts attempt
+                          ON attempt.execution_id = consumed.id
+                        LEFT JOIN control.usage_records usage
+                          ON usage.provider_attempt_id = attempt.id
+                        WHERE (
+                            (policy.scope_type = 'organization'
+                             AND consumed.organization_id = policy.scope_id)
+                            OR (policy.scope_type = 'project'
+                                AND consumed.project_id = policy.scope_id)
+                            OR (policy.scope_type = 'user'
+                                AND consumed.user_id = policy.scope_id)
+                            OR (policy.scope_type = 'application'
+                                AND consumed.application_id = policy.scope_id)
+                            OR (policy.scope_type = 'agent'
+                                AND consumed.agent_id = policy.scope_id)
+                        )
+                          AND consumed.started_at >= policy.starts_at
+                          AND (
+                              policy.period_type = 'execution'
+                              AND consumed.id = :execution_id
+                              OR policy.period_type = 'daily'
+                              AND consumed.started_at >= date_trunc('day', now())
+                              OR policy.period_type = 'monthly'
+                              AND consumed.started_at >= date_trunc('month', now())
+                              OR policy.period_type = 'rolling'
+                              AND consumed.started_at >= now() - make_interval(
+                                  secs => policy.window_seconds
+                              )
+                          )
+                    ) consumption ON true
+                    LEFT JOIN LATERAL (
+                        SELECT COALESCE(sum(reserved.reserved_requests), 0) AS requests,
+                               COALESCE(sum(reserved.reserved_tokens), 0) AS tokens,
+                               COALESCE(sum(reserved.reserved_cost), 0) AS cost
+                        FROM control.budget_reservations reserved
+                        JOIN control.executions reserved_execution
+                          ON reserved_execution.id = reserved.execution_id
+                        WHERE reserved.budget_policy_id = policy.id
+                          AND reserved.status = 'active'
+                          AND reserved.expires_at > now()
+                          AND reserved_execution.started_at >= policy.starts_at
+                          AND (
+                              policy.period_type = 'execution'
+                              AND reserved_execution.id = :execution_id
+                              OR policy.period_type = 'daily'
+                              AND reserved_execution.started_at >= date_trunc('day', now())
+                              OR policy.period_type = 'monthly'
+                              AND reserved_execution.started_at >= date_trunc('month', now())
+                              OR policy.period_type = 'rolling'
+                              AND reserved_execution.started_at >= now() - make_interval(
+                                  secs => policy.window_seconds
+                              )
+                          )
+                    ) reservations ON true
+                    WHERE policy.is_enabled
+                      AND policy.starts_at <= now()
+                      AND (policy.ends_at IS NULL OR policy.ends_at > now())
+                      AND (
+                          (policy.scope_type = 'organization'
+                           AND policy.scope_id = :organization_id)
+                          OR (policy.scope_type = 'project'
+                              AND policy.scope_id = :project_id)
+                          OR (policy.scope_type = 'user'
+                              AND policy.scope_id = :user_id)
+                          OR (policy.scope_type = 'application'
+                              AND policy.scope_id = :application_id)
+                          OR (policy.scope_type = 'agent'
+                              AND policy.scope_id = :agent_id)
+                      )
+                    ORDER BY policy.scope_type, policy.name
+                    """
+                ),
+                {
+                    "execution_id": execution_id,
+                    "organization_id": execution["organization_id"],
+                    "project_id": execution["project_id"],
+                    "user_id": execution["user_id"],
+                    "application_id": execution["application_id"],
+                    "agent_id": execution["agent_id"],
+                },
+            )
+        ).mappings().all()
+        return [
+            BudgetSnapshot(
+                policy_id=row["id"],
+                name=row["name"],
+                scope_type=row["scope_type"],
+                period_type=row["period_type"],
+                mode=RuntimePolicyMode(row["mode"]),
+                consumed_requests=int(row["consumed_requests"]),
+                consumed_tokens=int(row["consumed_tokens"]),
+                consumed_cost=row["consumed_cost"],
+                max_requests=row["max_requests"],
+                max_tokens=row["max_tokens"],
+                max_cost=row["max_cost"],
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    async def _reserve_preflight_budget(
+        connection,  # type: ignore[no-untyped-def]
+        execution_id: UUID,
+        assessment: PreflightAssessment,
+        request: RuntimePreflightRequest,
+        now: datetime,
+    ) -> None:
+        for budget in assessment.budgets:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO control.budget_reservations (
+                        budget_policy_id, execution_id, status,
+                        reserved_requests, reserved_tokens, reserved_cost,
+                        expires_at
+                    ) VALUES (
+                        :policy_id, :execution_id, 'active', 1,
+                        :tokens, :cost,
+                        CAST(:now AS timestamptz) + interval '15 minutes'
+                    )
+                    ON CONFLICT (budget_policy_id, execution_id) DO UPDATE
+                    SET status = 'active',
+                        reserved_requests =
+                            budget_reservations.reserved_requests + 1,
+                        reserved_tokens =
+                            budget_reservations.reserved_tokens + EXCLUDED.reserved_tokens,
+                        reserved_cost =
+                            budget_reservations.reserved_cost + EXCLUDED.reserved_cost,
+                        expires_at = EXCLUDED.expires_at,
+                        reconciled_at = NULL
+                    """
+                ),
+                {
+                    "policy_id": budget.policy_id,
+                    "execution_id": execution_id,
+                    "tokens": request.input_tokens + request.requested_output_tokens,
+                    "cost": request.estimated_cost,
+                    "now": now,
+                },
+            )
 
     @staticmethod
     async def _database_now(connection) -> datetime:  # type: ignore[no-untyped-def]
