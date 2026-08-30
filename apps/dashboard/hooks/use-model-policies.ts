@@ -15,6 +15,7 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const latest = useRef(policies);
+  const persisted = useRef<Record<string, ModelPolicy>>({});
   const activeConnection = useRef(connection);
   const saveQueue = useRef<Map<string, Promise<unknown>>>(new Map());
 
@@ -26,6 +27,7 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
   useEffect(() => {
     activeConnection.current = connection;
     saveQueue.current.clear();
+    persisted.current = {};
     replacePolicies({});
     setSavingKeys(new Set());
     if (!connection) {
@@ -37,10 +39,16 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
     setLoading(true);
     setError(null);
     void listModelPolicies(connection, controller.signal)
-      .then((rows) => replacePolicies(Object.fromEntries(rows.map((row) => [
-        policyKey(row.provider, row.model),
-        { mode: row.mode, tokenLimit: row.token_limit },
-      ]))))
+      .then((rows) => {
+        const loaded = Object.fromEntries(rows.map((row) => [
+          policyKey(row.provider, row.model),
+          { mode: row.mode, tokenLimit: row.token_limit },
+        ]));
+        if (activeConnection.current === connection) {
+          persisted.current = loaded;
+          replacePolicies(loaded);
+        }
+      })
       .catch((caught: Error) => {
         if (caught.name !== "AbortError") setError(caught.message);
       })
@@ -54,7 +62,6 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
     if (!connection) throw new Error("Connect to the control API before saving model policies.");
     const targetConnection = connection;
     const key = policyKey(provider, model);
-    const previous = latest.current[key];
     const optimistic = { ...nextPolicy };
     replacePolicies({ ...latest.current, [key]: optimistic });
     setSavingKeys((current) => new Set(current).add(key));
@@ -66,13 +73,19 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
     saveQueue.current.set(key, save);
     try {
       const saved = await save;
-      if (activeConnection.current === targetConnection && latest.current[key] === optimistic) {
-        replacePolicies({ ...latest.current, [key]: { mode: saved.mode, tokenLimit: saved.token_limit } });
+      if (activeConnection.current === targetConnection) {
+        const confirmed = { mode: saved.mode, tokenLimit: saved.token_limit };
+        persisted.current = { ...persisted.current, [key]: confirmed };
+        setError(null);
+        if (latest.current[key] === optimistic) {
+          replacePolicies({ ...latest.current, [key]: confirmed });
+        }
       }
     } catch (caught) {
       if (activeConnection.current === targetConnection && latest.current[key] === optimistic) {
         const rollback = { ...latest.current };
-        if (previous) rollback[key] = previous;
+        const confirmed = persisted.current[key];
+        if (confirmed) rollback[key] = confirmed;
         else delete rollback[key];
         replacePolicies(rollback);
       }
