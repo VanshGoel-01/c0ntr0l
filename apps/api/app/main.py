@@ -55,6 +55,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     provider_registry = ProviderRegistry(
         {"mock": provider, "ollama": ollama_provider},
         context_defaults={"mock": settings.mock_context_window_tokens},
+        catalog_timeout_seconds=settings.provider_catalog_timeout_seconds,
+        catalog_ttl_seconds=settings.provider_catalog_ttl_seconds,
     )
     health_service = create_health_service(settings, database)
     authentication_service = AuthenticationService(
@@ -68,7 +70,9 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         max_events=settings.event_stream_max_events,
         block_milliseconds=settings.event_stream_block_milliseconds,
     )
-    chat_service = ChatService(execution_repository, provider, execution_events)
+    chat_service = ChatService(
+        execution_repository, provider_registry, execution_events
+    )
     execution_query_service = ExecutionQueryService(execution_repository)
     workspace_service = WorkspaceService(WorkspaceRepository(database))
     incident_service = IncidentService(IncidentRepository(database), execution_events)
@@ -95,6 +99,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.incident_service = incident_service
     application.state.runtime_service = runtime_service
     application.state.execution_events = execution_events
+    application.state.provider_registry = provider_registry
     try:
         yield
     finally:

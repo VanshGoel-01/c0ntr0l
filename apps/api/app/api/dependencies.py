@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.domain.auth import ApiKeyPrincipal, InvalidApiKeyError
 from app.infrastructure.execution_events import ExecutionEvents
+from app.providers.registry import ProviderRegistry
 from app.services.authentication import AuthenticationService
 from app.services.chat import ChatService
 from app.services.executions import ExecutionQueryService
@@ -46,6 +47,10 @@ def get_runtime_service(request: Request) -> RuntimeService:
 
 def get_execution_events(request: Request) -> ExecutionEvents:
     return request.app.state.execution_events
+
+
+def get_provider_registry(request: Request) -> ProviderRegistry:
+    return request.app.state.provider_registry
 
 
 async def get_principal(

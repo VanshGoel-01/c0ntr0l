@@ -4,6 +4,7 @@ from control_schemas import (
     ChatCompletion,
     ChatCompletionChunk,
     ChatRequest,
+    ProviderModelList,
     StreamOptions,
 )
 from httpx import (
@@ -102,6 +103,20 @@ class HttpProviderClient:
             raise ProviderTimeoutError from exc
         except RequestError as exc:
             raise ProviderUnavailableError from exc
+
+    async def list_models(self) -> tuple[str, ...]:
+        try:
+            response = await self._client.get("/v1/models")
+        except TimeoutException as exc:
+            raise ProviderTimeoutError from exc
+        except RequestError as exc:
+            raise ProviderUnavailableError from exc
+        self._raise_for_status(response.status_code)
+        try:
+            payload = ProviderModelList.model_validate(response.json())
+        except (ValueError, ValidationError) as exc:
+            raise ProviderResponseError from exc
+        return tuple(model.id for model in payload.data)
 
     @staticmethod
     def _raise_for_status(status_code: int) -> None:

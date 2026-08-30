@@ -118,3 +118,23 @@ async def test_provider_stream_validates_and_returns_typed_chunks() -> None:
 
     assert len(chunks) == 1
     assert chunks[0].usage.total_tokens == 4
+
+
+@pytest.mark.asyncio
+async def test_provider_client_validates_model_catalog() -> None:
+    client = HttpProviderClient(
+        "http://provider.test",
+        1,
+        MockTransport(
+            lambda request: Response(
+                200,
+                json={"object": "list", "data": [{"id": "local-model"}]},
+            )
+        ),
+    )
+    try:
+        models = await client.list_models()
+    finally:
+        await client.close()
+
+    assert models == ("local-model",)

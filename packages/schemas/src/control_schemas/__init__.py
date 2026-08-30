@@ -26,6 +26,13 @@ from .executions import (
 )
 from .health import DependencyHealth, HealthResponse
 from .incidents import IncidentContext, IncidentStatus, IncidentStatusUpdate
+from .providers import (
+    ProviderAvailability,
+    ProviderCatalog,
+    ProviderModel,
+    ProviderModelList,
+    ProviderSummary,
+)
 from .runtime import (
     ContinuityPacket,
     RecoveryStrategy,
@@ -74,6 +81,11 @@ __all__ = [
     "IncidentStatus",
     "IncidentStatusUpdate",
     "MessageRole",
+    "ProviderAvailability",
+    "ProviderCatalog",
+    "ProviderModel",
+    "ProviderModelList",
+    "ProviderSummary",
     "RecoveryStrategy",
     "ResponseMessage",
     "RuntimeActionCheckRequest",

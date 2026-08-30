@@ -90,6 +90,7 @@ class ExecutionRepository:
         self,
         principal: ApiKeyPrincipal,
         requested_model: str,
+        provider_name: str,
         is_streaming: bool,
         request_id: str,
         input_fingerprint: str,
@@ -122,7 +123,7 @@ class ExecutionRepository:
                                        AND agent.slug = :agent_slug
                                        AND agent.status = 'active'),
                                     'running',
-                                    :model, 'mock', :model, :is_streaming, :input_fingerprint
+                                    :model, :provider, :model, :is_streaming, :input_fingerprint
                                 )
                                 RETURNING id
                                 """
@@ -132,6 +133,7 @@ class ExecutionRepository:
                                 "organization_id": principal.organization_id,
                                 "project_id": principal.project_id,
                                 "model": requested_model,
+                                "provider": provider_name,
                                 "is_streaming": is_streaming,
                                 "input_fingerprint": input_fingerprint,
                                 "application_slug": application_slug,
@@ -153,7 +155,7 @@ class ExecutionRepository:
                 execution_id=execution_id,
                 sequence_no=2,
                 kind="provider",
-                name="mock.chat.completion",
+                name=f"{provider_name}.chat.completion",
                 parent_span_id=root_span_id,
             )
             provider_attempt_id = UUID(
@@ -165,7 +167,7 @@ class ExecutionRepository:
                                 INSERT INTO control.provider_attempts (
                                     execution_id, span_id, attempt_no, provider, model
                                 ) VALUES (
-                                    :execution_id, :span_id, 1, 'mock', :model
+                                    :execution_id, :span_id, 1, :provider, :model
                                 )
                                 RETURNING id
                                 """
@@ -174,6 +176,7 @@ class ExecutionRepository:
                                 "execution_id": execution_id,
                                 "span_id": provider_span_id,
                                 "model": requested_model,
+                                "provider": provider_name,
                             },
                         )
                     ).scalar_one()
@@ -185,6 +188,7 @@ class ExecutionRepository:
             root_span_id=root_span_id,
             provider_span_id=provider_span_id,
             provider_attempt_id=provider_attempt_id,
+            provider_name=provider_name,
         )
 
     async def complete(
@@ -237,7 +241,7 @@ class ExecutionRepository:
                         currency, latency_ms
                     ) VALUES (
                         :execution_id, :span_id, :attempt_id, 'provider_reported',
-                        'mock', :model, :input_tokens, :output_tokens, 0,
+                        :provider, :model, :input_tokens, :output_tokens, 0,
                         'USD', :latency_ms
                     )
                     """
@@ -247,6 +251,7 @@ class ExecutionRepository:
                     "span_id": trace.provider_span_id,
                     "attempt_id": trace.provider_attempt_id,
                     "model": completion.model,
+                    "provider": trace.provider_name,
                     "input_tokens": completion.usage.prompt_tokens,
                     "output_tokens": completion.usage.completion_tokens,
                     "latency_ms": latency_ms,
@@ -256,7 +261,7 @@ class ExecutionRepository:
                 connection,
                 trace.execution_id,
                 actual_tokens=completion.usage.total_tokens,
-                actual_cost=Decimal("0"),
+                actual_cost=Decimal(0),
                 now=now,
             )
 
@@ -289,7 +294,7 @@ class ExecutionRepository:
                 connection,
                 trace.execution_id,
                 actual_tokens=0,
-                actual_cost=Decimal("0"),
+                actual_cost=Decimal(0),
                 now=now,
             )
             await self._finish_span(
