@@ -7,6 +7,7 @@ import type {
   Health,
   Incident,
   IncidentStatus,
+  ModelPolicy,
   ProviderCatalog,
   RuntimeCancellationResult,
   RuntimeCheckpoint,
@@ -177,6 +178,16 @@ type ApiProviderCatalog = {
     status: "operational" | "unavailable";
     models: string[];
   }>;
+};
+type ApiModelPolicy = {
+  id: string;
+  project_id: string;
+  provider: string;
+  model: string;
+  mode: ModelPolicy["mode"];
+  token_limit: number | null;
+  created_at: string;
+  updated_at: string;
 };
 
 function normalizeUrl(url: string): string {
@@ -479,6 +490,25 @@ export async function listProviders(config: ConnectionConfig, signal?: AbortSign
     checkedAt: value.checked_at,
     providers: value.providers,
   };
+}
+
+export async function listModelPolicies(config: ConnectionConfig, signal?: AbortSignal): Promise<ApiModelPolicy[]> {
+  const response = await fetch(`${normalizeUrl(config.apiUrl)}/api/v1/model-policies`, { cache: "no-store", headers: authHeaders(config), signal });
+  return readJson<ApiModelPolicy[]>(response);
+}
+
+export async function upsertModelPolicy(
+  config: ConnectionConfig,
+  provider: string,
+  model: string,
+  policy: ModelPolicy,
+): Promise<ApiModelPolicy> {
+  const response = await fetch(`${normalizeUrl(config.apiUrl)}/api/v1/model-policies`, {
+    method: "PUT",
+    headers: { ...authHeaders(config), "Content-Type": "application/json" },
+    body: JSON.stringify({ provider, model, mode: policy.mode, token_limit: policy.tokenLimit }),
+  });
+  return readJson<ApiModelPolicy>(response);
 }
 
 export async function listIncidents(config: ConnectionConfig, limit = 100, signal?: AbortSignal): Promise<Incident[]> {
