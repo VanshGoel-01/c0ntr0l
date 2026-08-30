@@ -195,6 +195,21 @@ Completed recoveries record a provider span, provider attempt, usage, output
 fingerprint, and source-to-resumed execution relationship. Raw model output is
 returned to the calling application but is not stored in execution metadata.
 
+Run the complete gateway recovery demonstration without a paid model:
+
+```powershell
+$env:CONTROL_API_URL = "http://127.0.0.1:8000"
+$env:CONTROL_API_KEY = "<local-project-api-key>"
+.\.venv\Scripts\python.exe scripts\demo_gateway_recovery.py
+```
+
+The script temporarily blocks `mock/mock-gpt`, proves that the provider call is
+skipped, and retrieves the sanitized continuity checkpoint. It then attempts a
+handoff to an intentionally unconfigured local target, verifies that failure
+restores the checkpoint, and continues through the mock provider. It restores
+the previous effective model policy before exiting and never prints the API key
+or raw prompt content.
+
 Each request receives an execution identity and trace before it reaches a model.
 Deterministic policies evaluate budgets and repeated operations, while provider
 adapters normalize model responses and usage data. If a provider becomes

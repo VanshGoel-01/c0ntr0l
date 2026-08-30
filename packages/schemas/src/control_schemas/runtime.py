@@ -4,9 +4,10 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .chat import ChatCompletion
+from .model_policies import ModelPolicyMode
 
 
 class RuntimePolicyMode(StrEnum):
@@ -34,12 +35,22 @@ class RuntimeExecutionRequest(BaseModel):
 
     task: str = Field(min_length=1, max_length=2_000)
     model: str = Field(min_length=1, max_length=128)
-    provider: str = Field(default="custom", min_length=1, max_length=64)
+    provider: str = Field(
+        default="custom",
+        min_length=1,
+        max_length=63,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,62}$",
+    )
     application_slug: str | None = Field(default=None, min_length=1, max_length=63)
     agent_slug: str | None = Field(default=None, min_length=1, max_length=63)
     repeat_threshold: int = Field(default=3, ge=2, le=20)
     window_size: int = Field(default=12, ge=4, le=100)
     policy_mode: RuntimePolicyMode = RuntimePolicyMode.ENFORCE
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def normalize_provider(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 class RuntimeExecutionCreated(BaseModel):
@@ -98,7 +109,7 @@ class RuntimePreflightRequest(BaseModel):
 
     input_tokens: int = Field(ge=0)
     requested_output_tokens: int = Field(ge=1, le=32_768)
-    estimated_cost: Decimal = Field(default=Decimal("0"), ge=0)
+    estimated_cost: Decimal = Field(default=Decimal(0), ge=0)
 
 
 class RuntimeBudgetProjection(BaseModel):
@@ -121,6 +132,18 @@ class RuntimeBudgetProjection(BaseModel):
     exceeded: bool
 
 
+class RuntimeModelPolicyProjection(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    policy_id: UUID
+    provider: str
+    model: str
+    mode: ModelPolicyMode
+    projected_tokens: int = Field(ge=0)
+    token_limit: int | None = None
+    triggered: bool
+
+
 class RuntimePreflightResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -137,6 +160,7 @@ class RuntimePreflightResult(BaseModel):
     context_remaining_tokens: int
     context_utilization: float = Field(ge=0)
     budgets: list[RuntimeBudgetProjection] = Field(default_factory=list)
+    model_policy: RuntimeModelPolicyProjection | None = None
     checkpoint_id: UUID | None = None
 
 
@@ -196,14 +220,13 @@ class RuntimeRecoveryRequest(BaseModel):
             self.strategy is RecoveryStrategy.RETRY_MODIFIED
             and not self.modified_arguments
         ):
+            raise ValueError("modified_arguments are required for retry_modified")
+        if self.strategy is RecoveryStrategy.MODEL_HANDOFF and (
+            self.target_provider is None or self.target_model is None
+        ):
             raise ValueError(
-                "modified_arguments are required for retry_modified"
+                "target_provider and target_model are required for model_handoff"
             )
-        if self.strategy is RecoveryStrategy.MODEL_HANDOFF:
-            if self.target_provider is None or self.target_model is None:
-                raise ValueError(
-                    "target_provider and target_model are required for model_handoff"
-                )
         return self
 
 

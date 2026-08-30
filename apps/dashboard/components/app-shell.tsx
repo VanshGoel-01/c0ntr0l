@@ -16,6 +16,7 @@ import { Topbar } from "@/components/topbar";
 import { useConsoleSettings } from "@/hooks/use-console-settings";
 import { useControlData } from "@/hooks/use-control-data";
 import { useModelPolicies } from "@/hooks/use-model-policies";
+import { useProviderStatus } from "@/hooks/use-provider-status";
 import { useTheme } from "@/hooks/use-theme";
 import type { Execution, ViewId } from "@/lib/types";
 
@@ -33,7 +34,8 @@ export function AppShell() {
   const [requestedExecution, setRequestedExecution] = useState<Execution | null>(null);
   const data = useControlData();
   const consoleState = useConsoleSettings();
-  const modelState = useModelPolicies();
+  const modelState = useModelPolicies(data.connection);
+  const providerState = useProviderStatus(data.connection);
   const themeState = useTheme();
   const systemHealthy = data.mode === "live" && (data.health?.status === "ok" || data.health?.status === "healthy");
   const systemStatus = data.mode === "disconnected" ? "Disconnected" : systemHealthy ? "Operational" : "Degraded";
@@ -43,6 +45,9 @@ export function AppShell() {
   }, [application, data.executions, timeRange]);
   const incidents = useMemo(() => data.incidents.filter((incident) => executions.some((run) => run.id === incident.executionId)), [data.incidents, executions]);
   const notificationCount = incidents.filter((incident) => incident.status === "open" && ((incident.severity === "critical" && consoleState.settings.notifyCritical) || (incident.severity !== "critical" && consoleState.settings.notifyWarnings))).length;
+  const modelTargets = useMemo(() => (providerState.status?.providers ?? [])
+    .filter((provider) => provider.status === "operational")
+    .flatMap((provider) => provider.models.map((model) => ({ provider: provider.name, model }))), [providerState.status]);
 
   function openRun(run: Execution) {
     setRequestedExecution(run);
@@ -51,17 +56,17 @@ export function AppShell() {
 
   function renderView() {
     if (activeView === "overview") return <Overview executions={executions} incidents={incidents} modelPolicies={modelState.policies} onOpenRun={openRun} onViewIncidents={() => setActiveView("incidents")} onViewModels={() => setActiveView("models")} onViewRuns={() => setActiveView("runs")} settings={consoleState.settings} workspace={data.workspace} />;
-    if (activeView === "runs") return <RunsView cancelExecution={data.cancelExecution} executions={executions} loadExecution={data.loadExecution} loadIntervention={data.loadIntervention} onSelectionHandled={() => setRequestedExecution(null)} recoverExecution={data.recoverExecution} requestedExecution={requestedExecution} settings={consoleState.settings} />;
+    if (activeView === "runs") return <RunsView cancelExecution={data.cancelExecution} executions={executions} loadExecution={data.loadExecution} loadIntervention={data.loadIntervention} modelPolicies={modelState.policies} modelTargets={modelTargets} onSelectionHandled={() => setRequestedExecution(null)} recoverExecution={data.recoverExecution} requestedExecution={requestedExecution} settings={consoleState.settings} />;
     if (activeView === "budgets") return <BudgetsView executions={executions} modelPolicies={modelState.policies} workspace={data.workspace} />;
     if (activeView === "incidents") return <IncidentsView executions={executions} incidents={incidents} onOpenRun={openRun} onStatus={data.updateIncidentStatus} />;
-    if (activeView === "models") return <ModelsView connection={data.connection} executions={executions} onLimit={modelState.updateLimit} onMode={modelState.updateMode} policies={modelState.policies} />;
+    if (activeView === "models") return <ModelsView error={modelState.error} executions={executions} loadingPolicies={modelState.loading} loadingProviders={providerState.loading} onLimit={modelState.updateLimit} onMode={modelState.updateMode} onRefreshProviders={providerState.refresh} policies={modelState.policies} providerCatalog={providerState.status} providerError={providerState.error} savingKeys={modelState.savingKeys} />;
     if (activeView === "settings") return <SettingsView connection={data.connection} health={data.health} mode={data.mode} onConnection={() => setConnectionOpen(true)} onUpdate={consoleState.update} settings={consoleState.settings} />;
     return <ProfileView connection={data.connection} mode={data.mode} onDisconnect={data.disconnect} workspace={data.workspace} />;
   }
 
   return <div className="app-shell">
     <Sidebar activeView={activeView} onNavigate={setActiveView} organization={data.workspace.organizationName} systemHealthy={systemHealthy} systemStatus={systemStatus} />
-    <div className="workspace"><Topbar applications={data.workspace.applications} incidentCount={notificationCount} loading={data.loading} mode={data.mode} onApplicationChange={setApplication} onConnect={() => setConnectionOpen(true)} onNotifications={() => setActiveView("incidents")} onProfile={() => setActiveView("profile")} onRefresh={() => void data.refresh()} onThemeToggle={themeState.toggleTheme} onTimeRangeChange={setTimeRange} project={data.workspace.projectName} selectedApplication={application} systemHealthy={systemHealthy} theme={themeState.theme} timeRange={timeRange} title={titles[activeView]} />
+    <div className="workspace"><Topbar applications={data.workspace.applications} incidentCount={notificationCount} loading={data.loading || providerState.loading} mode={data.mode} onApplicationChange={setApplication} onConnect={() => setConnectionOpen(true)} onNotifications={() => setActiveView("incidents")} onProfile={() => setActiveView("profile")} onRefresh={() => void Promise.all([data.refresh(), providerState.refresh()])} onThemeToggle={themeState.toggleTheme} onTimeRangeChange={setTimeRange} project={data.workspace.projectName} selectedApplication={application} systemHealthy={systemHealthy} theme={themeState.theme} timeRange={timeRange} title={titles[activeView]} />
       {data.error && data.mode === "live" && <div className="runtime-banner">Refresh failed: {data.error}</div>}
       <main className="main-content">{data.mode === "disconnected" ? <section className="panel disconnected-state"><PlugZap size={24} /><div><h2>Connect the control plane</h2><p>Authenticate with a project API key to load executions, budgets, incidents, and provider usage.</p></div><button className="primary-button" onClick={() => setConnectionOpen(true)} type="button">Connect API</button></section> : renderView()}</main></div>
     <ConnectionDialog connection={data.connection} error={data.error} loading={data.loading} mode={data.mode} onClose={() => setConnectionOpen(false)} onConnect={data.connect} onDisconnect={data.disconnect} open={connectionOpen} />

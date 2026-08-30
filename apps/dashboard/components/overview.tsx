@@ -49,11 +49,12 @@ export function Overview(props: OverviewProps) {
     </section>
 
     <div className="overview-primary"><UsageChart data={deriveActivityChart(props.executions)} />
-      <section className="panel model-summary"><div className="panel-heading"><div><h2>Model capacity</h2><p>Usage and configured limits</p></div><button className="link-button" onClick={props.onViewModels} type="button">Manage <ArrowRight size={14} /></button></div>
+      <section className="panel model-summary"><div className="panel-heading"><div><h2>Model controls</h2><p>Largest calls against per-call limits</p></div><button className="link-button" onClick={props.onViewModels} type="button">Manage <ArrowRight size={14} /></button></div>
         <div className="capacity-list">{models.slice(0, 4).map((model) => {
           const policy = props.modelPolicies[model.key];
-          const percent = policy?.tokenLimit ? Math.min(100, model.tokens / policy.tokenLimit * 100) : null;
-          return <button key={model.key} onClick={props.onViewModels} type="button"><div className="capacity-model"><ModelLogo model={model.model} provider={model.provider} /><div><strong>{model.model}</strong><span>{model.provider}</span></div></div><div className="capacity-values"><b>{formatTokens(model.tokens)}</b><span>{policy?.tokenLimit ? `${formatTokens(Math.max(0, policy.tokenLimit - model.tokens))} left` : "No limit"}</span></div><span className="progress-track"><i style={{ width: `${percent ?? 0}%` }} /></span></button>;
+          const largestCall = Math.max(0, ...props.executions.filter((run) => run.provider === model.provider && run.model === model.model).map((run) => run.totalTokens));
+          const percent = policy?.tokenLimit ? Math.min(100, largestCall / policy.tokenLimit * 100) : null;
+          return <button key={model.key} onClick={props.onViewModels} type="button"><div className="capacity-model"><ModelLogo model={model.model} provider={model.provider} /><div><strong>{model.model}</strong><span>{model.provider}</span></div></div><div className="capacity-values"><b>{formatTokens(largestCall)}</b><span>{policy?.tokenLimit ? `${formatTokens(policy.tokenLimit)} max` : "No limit"}</span></div><span className="progress-track"><i style={{ width: `${percent ?? 0}%` }} /></span></button>;
         })}</div>
       </section>
     </div>

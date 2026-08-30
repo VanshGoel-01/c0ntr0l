@@ -3,7 +3,6 @@ from uuid import UUID
 import httpx
 import pytest
 from control_schemas import RuntimeExecutionRequest
-
 from control_sdk import ControlApiError, ControlRuntimeClient
 
 EXECUTION_ID = "00000000-0000-0000-0000-000000000010"

@@ -5,9 +5,21 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from control_schemas import ChatCompletion, ChatRequest, ControlEventType
+from control_schemas import (
+    ChatCompletion,
+    ChatRequest,
+    ControlEventType,
+    RuntimeDecision,
+)
 
 from app.domain.auth import ApiKeyPrincipal
+from app.domain.executions import ExecutionTrace
+from app.domain.preflight import (
+    ModelPolicyAssessment,
+    ModelPolicySnapshot,
+    evaluate_model_policy,
+)
+from app.domain.recovery import estimate_chat_input_tokens
 from app.domain.streaming import ChatStreamAccumulator
 from app.infrastructure.execution_events import ExecutionEvents
 from app.providers.errors import (
@@ -17,12 +29,30 @@ from app.providers.errors import (
 )
 from app.providers.registry import ProviderRegistry, ProviderSelection
 from app.repositories.executions import ExecutionRepository
+from app.repositories.model_policies import ModelPolicyRepository
+
+
+class ChatPolicyBlockedError(Exception):
+    def __init__(
+        self,
+        *,
+        execution_id: UUID,
+        provider_name: str,
+        reason: str,
+        checkpoint_id: UUID,
+    ) -> None:
+        super().__init__(reason)
+        self.execution_id = execution_id
+        self.provider_name = provider_name
+        self.reason = reason
+        self.checkpoint_id = checkpoint_id
 
 
 @dataclass(frozen=True, slots=True)
 class ChatResult:
     execution_id: str
     provider_name: str
+    decision: RuntimeDecision
     completion: ChatCompletion
 
 
@@ -30,6 +60,7 @@ class ChatResult:
 class ChatStreamResult:
     execution_id: str
     provider_name: str
+    decision: RuntimeDecision
     events: AsyncIterator[str]
 
 
@@ -39,10 +70,12 @@ class ChatService:
         repository: ExecutionRepository,
         providers: ProviderRegistry,
         events: ExecutionEvents | None = None,
+        model_policies: ModelPolicyRepository | None = None,
     ) -> None:
         self._repository = repository
         self._providers = providers
         self._events = events
+        self._model_policies = model_policies
 
     async def complete(
         self,
@@ -71,6 +104,12 @@ class ChatService:
         )
         await self._publish(
             principal, ControlEventType.EXECUTION_STARTED, trace.execution_id
+        )
+        assessment = await self._admit_with_trace_guard(
+            principal,
+            trace,
+            selection,
+            request,
         )
         started_at = time.perf_counter()
         try:
@@ -101,6 +140,7 @@ class ChatService:
         return ChatResult(
             execution_id=str(trace.execution_id),
             provider_name=selection.name,
+            decision=assessment.decision,
             completion=completion,
         )
 
@@ -129,10 +169,16 @@ class ChatService:
             application_slug,
             agent_slug,
         )
-        provider_stream = selection.provider.stream(request, demo_scenario).__aiter__()
         await self._publish(
             principal, ControlEventType.EXECUTION_STARTED, trace.execution_id
         )
+        assessment = await self._admit_with_trace_guard(
+            principal,
+            trace,
+            selection,
+            request,
+        )
+        provider_stream = selection.provider.stream(request, demo_scenario).__aiter__()
         started_at = time.perf_counter()
         try:
             first_chunk = await anext(provider_stream)
@@ -211,8 +257,95 @@ class ChatService:
         return ChatStreamResult(
             execution_id=str(trace.execution_id),
             provider_name=selection.name,
+            decision=assessment.decision,
             events=relay(),
         )
+
+    async def _admit_with_trace_guard(
+        self,
+        principal: ApiKeyPrincipal,
+        trace: ExecutionTrace,
+        selection: ProviderSelection,
+        request: ChatRequest,
+    ) -> ModelPolicyAssessment:
+        started_at = time.perf_counter()
+        try:
+            return await self._admit(principal, trace, selection, request)
+        except ChatPolicyBlockedError:
+            raise
+        except Exception as admission_error:
+            try:
+                await self._repository.fail(
+                    trace,
+                    error_code="admission_control_error",
+                    attempt_status="failed",
+                    latency_ms=self._elapsed_ms(started_at),
+                )
+                await self._publish(
+                    principal,
+                    ControlEventType.EXECUTION_FAILED,
+                    trace.execution_id,
+                )
+            except Exception as trace_error:
+                raise admission_error from trace_error
+            raise
+
+    async def _admit(
+        self,
+        principal: ApiKeyPrincipal,
+        trace: ExecutionTrace,
+        selection: ProviderSelection,
+        request: ChatRequest,
+    ) -> ModelPolicyAssessment:
+        context = None
+        if self._model_policies is not None:
+            context = await self._model_policies.get(
+                principal.project_id,
+                selection.name,
+                request.model,
+            )
+        snapshot = (
+            ModelPolicySnapshot(
+                policy_id=context.id,
+                provider=context.provider,
+                model=context.model,
+                mode=context.mode,
+                token_limit=context.token_limit,
+            )
+            if context is not None
+            else None
+        )
+        assessment = evaluate_model_policy(
+            snapshot,
+            input_tokens=estimate_chat_input_tokens(request),
+            requested_output_tokens=request.max_tokens,
+        )
+        checkpoint_id = await self._repository.record_model_policy(
+            trace,
+            request.model,
+            assessment,
+        )
+        if assessment.decision is RuntimeDecision.BLOCK:
+            if checkpoint_id is None:
+                raise RuntimeError("Blocked chat admission did not create a checkpoint")
+            await self._publish(
+                principal,
+                ControlEventType.EXECUTION_BLOCKED,
+                trace.execution_id,
+            )
+            raise ChatPolicyBlockedError(
+                execution_id=trace.execution_id,
+                provider_name=selection.name,
+                reason=assessment.reason,
+                checkpoint_id=checkpoint_id,
+            )
+        if assessment.projection is not None:
+            await self._publish(
+                principal,
+                ControlEventType.EXECUTION_UPDATED,
+                trace.execution_id,
+            )
+        return assessment
 
     async def _select_provider(
         self,

@@ -129,6 +129,7 @@ class RecoveryRepository:
     async def block(self, execution_id: UUID, reason: str) -> None:
         async with self._database.begin() as connection:
             now = await self._database_now(connection)
+            await self._restore_source_checkpoint(connection, execution_id)
             await connection.execute(
                 text(
                     """
@@ -266,6 +267,7 @@ class RecoveryRepository:
     ) -> None:
         async with self._database.begin() as connection:
             now = await self._database_now(connection)
+            await self._restore_source_checkpoint(connection, trace.execution_id)
             await connection.execute(
                 text(
                     """
@@ -338,6 +340,70 @@ class RecoveryRepository:
                 actual_cost=Decimal(0),
                 now=now,
             )
+
+    @staticmethod
+    async def _restore_source_checkpoint(connection, execution_id: UUID) -> None:  # type: ignore[no-untyped-def]
+        attempt = (
+            (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT source_execution_id, checkpoint_id, strategy, details
+                        FROM control.recovery_attempts
+                        WHERE resumed_execution_id = :execution_id
+                          AND status = 'prepared'
+                        FOR UPDATE
+                        """
+                    ),
+                    {"execution_id": execution_id},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if attempt is None:
+            return
+
+        await connection.execute(
+            text(
+                """
+                UPDATE control.continuity_checkpoints
+                SET status = 'available', consumed_at = NULL
+                WHERE id = :checkpoint_id
+                  AND status = 'consumed'
+                """
+            ),
+            {"checkpoint_id": attempt["checkpoint_id"]},
+        )
+
+        if attempt["strategy"] != "model_handoff":
+            return
+
+        details = dict(attempt["details"] or {})
+        source_status = details.get("source_status")
+        if source_status not in {"blocked", "cancelled", "failed"}:
+            source_status = "blocked"
+        source_final_reason = details.get("source_final_reason")
+        if not isinstance(source_final_reason, str):
+            source_final_reason = "policy_block"
+        await connection.execute(
+            text(
+                """
+                UPDATE control.executions
+                SET status = :source_status,
+                    final_reason = :source_final_reason,
+                    metadata = (metadata - 'resumed_execution_id')
+                        || '{"recovery_state":"checkpointed"}'::jsonb
+                WHERE id = :source_execution_id
+                  AND status = 'handed_off'
+                """
+            ),
+            {
+                "source_execution_id": attempt["source_execution_id"],
+                "source_status": source_status,
+                "source_final_reason": source_final_reason,
+            },
+        )
 
     @staticmethod
     async def _database_now(connection) -> datetime:  # type: ignore[no-untyped-def]

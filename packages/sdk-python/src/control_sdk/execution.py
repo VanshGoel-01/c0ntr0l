@@ -170,7 +170,7 @@ class ControlledExecution:
                     summary=f"{type(error).__name__} raised by guarded action",
                 ),
             )
-        except Exception as report_error:
+        except Exception as report_error:  # noqa: BLE001
             error.add_note(
                 "c0ntr0l could not record the failed action: "
                 f"{type(report_error).__name__}"

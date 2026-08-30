@@ -19,5 +19,7 @@ async def get_workspace(
 ) -> WorkspaceContext:
     workspace = await service.get(principal)
     if workspace is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
+        )
     return workspace
