@@ -52,3 +52,16 @@ def test_recovery_attempts_support_pre_provider_budget_blocks() -> None:
 
     assert "'blocked'" in admission_schema
     assert "recovery_attempts_status_check" in admission_schema
+
+
+def test_model_policies_are_project_scoped_and_auditable() -> None:
+    policy_schema = (
+        ROOT / "migrations" / "postgres" / "100_model_policies.sql"
+    ).read_text(encoding="utf-8")
+    repository = (
+        ROOT / "apps" / "api" / "app" / "repositories" / "model_policies.py"
+    ).read_text(encoding="utf-8")
+
+    assert "UNIQUE (project_id, provider, model)" in policy_schema
+    assert "CHECK (mode IN ('observe', 'warn', 'block'))" in policy_schema
+    assert "'model_policy.updated'" in repository

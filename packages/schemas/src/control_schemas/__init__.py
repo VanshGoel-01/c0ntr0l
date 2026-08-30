@@ -26,6 +26,7 @@ from .executions import (
 )
 from .health import DependencyHealth, HealthResponse
 from .incidents import IncidentContext, IncidentStatus, IncidentStatusUpdate
+from .model_policies import ModelPolicyContext, ModelPolicyMode, ModelPolicyUpsert
 from .providers import (
     ProviderAvailability,
     ProviderCatalog,
@@ -81,6 +82,9 @@ __all__ = [
     "IncidentStatus",
     "IncidentStatusUpdate",
     "MessageRole",
+    "ModelPolicyContext",
+    "ModelPolicyMode",
+    "ModelPolicyUpsert",
     "ProviderAvailability",
     "ProviderCatalog",
     "ProviderModel",
