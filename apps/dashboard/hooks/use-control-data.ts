@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { cancelRuntimeExecution, getExecution, getHealth, getRuntimeIntervention, getWorkspace, listExecutions, listIncidents, normalizeConnection, recoverRuntimeExecution, updateIncidentStatus as persistIncidentStatus } from "@/lib/api";
+import { cancelRuntimeExecution, getExecution, getHealth, getRuntimeIntervention, getWorkspace, listExecutions, listIncidents, normalizeConnection, recoverRuntimeExecution, updateIncidentStatus as persistIncidentStatus, watchControlEvents } from "@/lib/api";
 import type { ConnectionConfig, DataMode, Execution, ExecutionDetail, Health, Incident, IncidentStatus, RuntimeIntervention, RuntimeRecoveryRequest, RuntimeRecoveryResult, WorkspaceContext } from "@/lib/types";
 
-const REFRESH_MS = 15_000;
+const REFRESH_MS = 30_000;
+const EVENT_RECONNECT_MS = 1_500;
+const EVENT_REFRESH_DEBOUNCE_MS = 250;
 const emptyWorkspace: WorkspaceContext = {
   organizationId: "",
   organizationName: "No workspace",
@@ -29,6 +31,7 @@ export function useControlData() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
+  const eventRequest = useRef<AbortController | null>(null);
 
   const refreshTarget = useCallback(async (target: ConnectionConfig) => {
     activeRequest.current?.abort();
@@ -64,6 +67,7 @@ export function useControlData() {
 
   const disconnect = useCallback(() => {
     activeRequest.current?.abort();
+    eventRequest.current?.abort();
     setConnection(null);
     setHealth(null);
     setMode("disconnected");
@@ -110,7 +114,51 @@ export function useControlData() {
     return () => window.clearInterval(timer);
   }, [connection, refreshTarget]);
 
-  useEffect(() => () => activeRequest.current?.abort(), []);
+  useEffect(() => {
+    if (!connection) return;
+    const controller = new AbortController();
+    eventRequest.current = controller;
+    let lastEventId: string | undefined;
+    let refreshTimer: number | undefined;
+
+    const reconnectDelay = () => new Promise<void>((resolve) => {
+      const timer = window.setTimeout(resolve, EVENT_RECONNECT_MS);
+      controller.signal.addEventListener("abort", () => {
+        window.clearTimeout(timer);
+        resolve();
+      }, { once: true });
+    });
+    const queueRefresh = () => {
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        void refreshTarget(connection).catch(() => undefined);
+      }, EVENT_REFRESH_DEBOUNCE_MS);
+    };
+    const run = async () => {
+      while (!controller.signal.aborted) {
+        try {
+          await watchControlEvents(connection, controller.signal, (event) => {
+            lastEventId = event.id;
+            queueRefresh();
+          }, lastEventId);
+        } catch (caught) {
+          if ((caught as Error).name === "AbortError" || controller.signal.aborted) return;
+        }
+        await reconnectDelay();
+      }
+    };
+    void run();
+    return () => {
+      controller.abort();
+      if (refreshTimer !== undefined) window.clearTimeout(refreshTimer);
+      if (eventRequest.current === controller) eventRequest.current = null;
+    };
+  }, [connection, refreshTarget]);
+
+  useEffect(() => () => {
+    activeRequest.current?.abort();
+    eventRequest.current?.abort();
+  }, []);
 
   const refresh = useCallback(async () => {
     if (connection) await refreshTarget(connection);

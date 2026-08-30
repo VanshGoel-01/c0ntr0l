@@ -117,6 +117,19 @@ type ApiRecoveryResult = {
   message: string;
 };
 type ApiCancellationResult = { execution_id: string; status: string; checkpoint_id: string | null };
+type ApiControlEvent = {
+  id: string;
+  type: "execution.started" | "execution.updated" | "execution.completed" | "execution.failed" | "execution.blocked" | "execution.cancelled" | "incident.updated" | "recovery.updated";
+  execution_id: string | null;
+  occurred_at: string;
+};
+
+export type ControlEvent = {
+  id: string;
+  type: ApiControlEvent["type"];
+  executionId: string | null;
+  occurredAt: string;
+};
 type ApiIncident = {
   id: string;
   execution_id: string;
@@ -357,6 +370,65 @@ async function readJson<T>(response: Response): Promise<T> {
 
 function authHeaders(config: ConnectionConfig): Record<string, string> {
   return { Authorization: `Bearer ${config.apiKey}` };
+}
+
+function parseEventFrame(frame: string): ControlEvent | null {
+  const data: string[] = [];
+  let eventId = "";
+  for (const line of frame.split(/\r?\n/)) {
+    if (line.startsWith("id:")) eventId = line.slice(3).trim();
+    if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+  }
+  if (data.length === 0) return null;
+  const value = JSON.parse(data.join("\n")) as ApiControlEvent;
+  if (!/^\d+-\d+$/.test(eventId) || value.id !== eventId) {
+    throw new Error("The live event stream returned an invalid event identifier.");
+  }
+  return {
+    id: value.id,
+    type: value.type,
+    executionId: value.execution_id,
+    occurredAt: value.occurred_at,
+  };
+}
+
+export async function watchControlEvents(
+  config: ConnectionConfig,
+  signal: AbortSignal,
+  onEvent: (event: ControlEvent) => void,
+  lastEventId?: string,
+): Promise<void> {
+  const headers = authHeaders(config);
+  if (lastEventId) headers["Last-Event-ID"] = lastEventId;
+  const response = await fetch(`${normalizeUrl(config.apiUrl)}/api/v1/events`, {
+    cache: "no-store",
+    headers,
+    signal,
+  });
+  if (!response.ok) {
+    await readJson<never>(response);
+  }
+  if (!response.body) throw new Error("The live event stream has no response body.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (!signal.aborted) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    if (buffer.length > 1_048_576) {
+      throw new Error("The live event stream exceeded its frame limit.");
+    }
+    let boundary = /\r?\n\r?\n/.exec(buffer);
+    while (boundary) {
+      const frame = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary[0].length);
+      const event = parseEventFrame(frame);
+      if (event) onEvent(event);
+      boundary = /\r?\n\r?\n/.exec(buffer);
+    }
+    if (done) return;
+  }
 }
 
 export async function getHealth(apiUrl: string, signal?: AbortSignal): Promise<Health> {
