@@ -203,6 +203,10 @@ $env:CONTROL_API_KEY = "<local-project-api-key>"
 .\.venv\Scripts\python.exe scripts\demo_gateway_recovery.py
 ```
 
+To stop after checkpoint creation and complete recovery from the dashboard or
+CLI, add `--prepare-only`. The script restores the model policy before exiting,
+so retrying the prepared execution can call the local mock provider.
+
 The script temporarily blocks `mock/mock-gpt`, proves that the provider call is
 skipped, and retrieves the sanitized continuity checkpoint. It then attempts a
 handoff to an intentionally unconfigured local target, verifies that failure

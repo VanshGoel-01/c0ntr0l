@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import json
 import os
@@ -61,7 +62,7 @@ async def set_policy(
     await read_json(response)
 
 
-async def run_demo() -> dict[str, object]:
+async def run_demo(*, prepare_only: bool = False) -> dict[str, object]:
     authorization = {"Authorization": f"Bearer {api_key()}"}
     gateway_headers = {**authorization, "X-Control-Provider": PROVIDER}
     timeout = httpx.Timeout(20)
@@ -130,6 +131,16 @@ async def run_demo() -> dict[str, object]:
                 raise RuntimeError("The blocked execution has no available checkpoint")
 
             await set_policy(client, authorization, mode="observe", token_limit=None)
+            if prepare_only:
+                return {
+                    "blocked_execution_id": execution_id,
+                    "checkpoint_id": checkpoint_id,
+                    "policy_outcome": intervention.get("outcome"),
+                    "provider": PROVIDER,
+                    "model": MODEL,
+                    "recovery_status": "ready",
+                }
+
             failed_handoff = await read_json(
                 await client.post(
                     f"/api/v1/runtime/executions/{execution_id}/recover",
@@ -205,5 +216,24 @@ async def run_demo() -> dict[str, object]:
             )
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Demonstrate gateway blocking and checkpoint recovery locally."
+    )
+    parser.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Create a recoverable blocked execution for a web or CLI demonstration.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    print(json.dumps(asyncio.run(run_demo()), indent=2, sort_keys=True))
+    arguments = parse_args()
+    print(
+        json.dumps(
+            asyncio.run(run_demo(prepare_only=arguments.prepare_only)),
+            indent=2,
+            sort_keys=True,
+        )
+    )
