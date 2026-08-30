@@ -4,8 +4,8 @@ import pytest
 from app.domain.auth import ApiKeyPrincipal
 from app.domain.executions import ExecutionTrace
 from app.providers.errors import ProviderUnavailableError
-from app.services.chat import ChatService, StreamingNotImplementedError
-from control_schemas import ChatCompletion, ChatRequest
+from app.services.chat import ChatService
+from control_schemas import ChatCompletion, ChatCompletionChunk, ChatRequest
 
 PRINCIPAL = ApiKeyPrincipal(
     api_key_id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -68,6 +68,51 @@ class FakeProvider:
             raise self.error
         return COMPLETION
 
+    async def stream(self, request, scenario=None):  # type: ignore[no-untyped-def]
+        if self.error is not None:
+            raise self.error
+        for chunk in stream_chunks():
+            yield chunk
+
+
+def stream_chunks() -> list[ChatCompletionChunk]:
+    common = {
+        "id": COMPLETION.id,
+        "created": COMPLETION.created,
+        "model": COMPLETION.model,
+    }
+    return [
+        ChatCompletionChunk.model_validate(
+            {
+                **common,
+                "choices": [
+                    {
+                        "delta": {"role": "assistant", "content": "private"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                **common,
+                "choices": [
+                    {
+                        "delta": {"content": " output"},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                **common,
+                "choices": [{"delta": {}, "finish_reason": "stop"}],
+                "usage": COMPLETION.usage.model_dump(),
+            }
+        ),
+    ]
+
 
 @pytest.mark.asyncio
 async def test_chat_service_records_trace_usage_and_only_fingerprints_content() -> None:
@@ -105,12 +150,38 @@ async def test_provider_failure_is_written_to_the_execution_trace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_streaming_is_rejected_before_an_execution_is_created() -> None:
+async def test_streaming_relays_chunks_and_reconciles_after_done() -> None:
     repository = FakeExecutionRepository()
     service = ChatService(repository, FakeProvider())  # type: ignore[arg-type]
     streaming_request = REQUEST.model_copy(update={"stream": True})
 
-    with pytest.raises(StreamingNotImplementedError):
-        await service.complete(PRINCIPAL, streaming_request, None, None)
+    result = await service.stream(PRINCIPAL, streaming_request, None, None)
+    events = [event async for event in result.events]
 
-    assert repository.started is None
+    assert result.execution_id == str(TRACE.execution_id)
+    assert events[-1] == "data: [DONE]\n\n"
+    assert repository.started is not None
+    assert repository.started[2] is True
+    assert repository.completed is not None
+    assert repository.failed is None
+    assert "private output" not in str(repository.completed[3:])
+
+
+@pytest.mark.asyncio
+async def test_streaming_provider_failure_is_recorded_before_response() -> None:
+    repository = FakeExecutionRepository()
+    service = ChatService(  # type: ignore[arg-type]
+        repository,
+        FakeProvider(ProviderUnavailableError()),
+    )
+
+    with pytest.raises(ProviderUnavailableError):
+        await service.stream(
+            PRINCIPAL,
+            REQUEST.model_copy(update={"stream": True}),
+            None,
+            None,
+        )
+
+    assert repository.failed is not None
+    assert repository.completed is None

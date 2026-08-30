@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.infrastructure.database import Database
+from app.infrastructure.execution_events import ExecutionEvents
 from app.infrastructure.postgres import PostgresProbe
 from app.infrastructure.redis import RedisProbe
 from app.infrastructure.runtime_signals import RuntimeSignals
@@ -62,10 +63,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     )
     execution_repository = ExecutionRepository(database)
     runtime_signals = RuntimeSignals(settings.redis_url)
-    chat_service = ChatService(execution_repository, provider)
+    execution_events = ExecutionEvents(
+        settings.redis_url,
+        max_events=settings.event_stream_max_events,
+        block_milliseconds=settings.event_stream_block_milliseconds,
+    )
+    chat_service = ChatService(execution_repository, provider, execution_events)
     execution_query_service = ExecutionQueryService(execution_repository)
     workspace_service = WorkspaceService(WorkspaceRepository(database))
-    incident_service = IncidentService(IncidentRepository(database))
+    incident_service = IncidentService(IncidentRepository(database), execution_events)
     recovery_runner = RecoveryRunner(
         RecoveryRepository(database),
         provider_registry,
@@ -79,6 +85,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         settings.default_context_window_tokens,
         settings.context_safety_margin_tokens,
         settings.context_warning_utilization,
+        execution_events,
     )
     application.state.health_service = health_service
     application.state.authentication_service = authentication_service
@@ -87,11 +94,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.workspace_service = workspace_service
     application.state.incident_service = incident_service
     application.state.runtime_service = runtime_service
+    application.state.execution_events = execution_events
     try:
         yield
     finally:
         await provider_registry.close()
         await runtime_signals.close()
+        await execution_events.close()
         await health_service.close()
 
 

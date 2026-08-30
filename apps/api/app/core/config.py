@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     database_url: str
     redis_url: str
+    event_stream_max_events: int = Field(default=1_000, ge=100, le=100_000)
+    event_stream_block_milliseconds: int = Field(default=15_000, ge=1_000, le=60_000)
     provider_base_url: str = "http://127.0.0.1:8002"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: float = Field(default=60.0, ge=1, le=300)

@@ -1,4 +1,11 @@
-from control_schemas import ChatCompletion, ChatRequest
+from collections.abc import AsyncIterator
+
+from control_schemas import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatRequest,
+    StreamOptions,
+)
 from httpx import (
     AsyncBaseTransport,
     AsyncClient,
@@ -16,6 +23,8 @@ from app.providers.errors import (
 
 
 class HttpProviderClient:
+    _MAX_STREAM_EVENT_BYTES = 1_048_576
+
     def __init__(
         self,
         base_url: str,
@@ -56,6 +65,52 @@ class HttpProviderClient:
             return ChatCompletion.model_validate(response.json())
         except (ValueError, ValidationError) as exc:
             raise ProviderResponseError from exc
+
+    async def stream(
+        self,
+        request: ChatRequest,
+        demo_scenario: str | None = None,
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        headers = {"X-Mock-Scenario": demo_scenario} if demo_scenario else None
+        stream_request = request.model_copy(
+            update={
+                "stream": True,
+                "stream_options": StreamOptions(include_usage=True),
+            }
+        )
+        try:
+            async with self._client.stream(
+                "POST",
+                "/v1/chat/completions",
+                json=stream_request.model_dump(mode="json", exclude_none=True),
+                headers=headers,
+            ) as response:
+                self._raise_for_status(response.status_code)
+                async for line in response.aiter_lines():
+                    if not line or line.startswith(":") or not line.startswith("data:"):
+                        continue
+                    payload = line.removeprefix("data:").strip()
+                    if payload == "[DONE]":
+                        return
+                    if len(payload.encode("utf-8")) > self._MAX_STREAM_EVENT_BYTES:
+                        raise ProviderResponseError
+                    try:
+                        yield ChatCompletionChunk.model_validate_json(payload)
+                    except (ValueError, ValidationError) as exc:
+                        raise ProviderResponseError from exc
+        except TimeoutException as exc:
+            raise ProviderTimeoutError from exc
+        except RequestError as exc:
+            raise ProviderUnavailableError from exc
+
+    @staticmethod
+    def _raise_for_status(status_code: int) -> None:
+        if status_code == 504:
+            raise ProviderTimeoutError
+        if status_code >= 500:
+            raise ProviderUnavailableError
+        if status_code >= 400:
+            raise ProviderResponseError
 
     async def close(self) -> None:
         await self._client.aclose()

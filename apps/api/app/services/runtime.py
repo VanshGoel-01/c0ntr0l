@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from control_schemas import (
+    ControlEventType,
     RecoveryStrategy,
     RuntimeActionCheckRequest,
     RuntimeActionCompleted,
@@ -19,6 +20,7 @@ from control_schemas import (
 
 from app.domain.auth import ApiKeyPrincipal
 from app.domain.recovery import estimate_chat_input_tokens
+from app.infrastructure.execution_events import ExecutionEvents
 from app.infrastructure.runtime_signals import RuntimeSignals
 from app.providers.registry import ProviderRegistry
 from app.repositories.runtime import RuntimeRepository
@@ -35,6 +37,7 @@ class RuntimeService:
         default_context_window_tokens: int,
         context_safety_margin_tokens: int,
         context_warning_utilization: float,
+        events: ExecutionEvents | None = None,
     ) -> None:
         self._repository = repository
         self._signals = signals
@@ -43,13 +46,20 @@ class RuntimeService:
         self._default_context_window_tokens = default_context_window_tokens
         self._context_safety_margin_tokens = context_safety_margin_tokens
         self._context_warning_utilization = context_warning_utilization
+        self._events = events
 
     async def start(
         self,
         principal: ApiKeyPrincipal,
         request: RuntimeExecutionRequest,
     ) -> RuntimeExecutionCreated:
-        return await self._repository.start(principal, request)
+        result = await self._repository.start(principal, request)
+        await self._publish(
+            principal,
+            ControlEventType.EXECUTION_STARTED,
+            result.execution_id,
+        )
+        return result
 
     async def check_action(
         self,
@@ -61,7 +71,17 @@ class RuntimeService:
             principal.project_id, execution_id
         ):
             await self._repository.cancel(principal, execution_id)
-        return await self._repository.check_action(principal, execution_id, request)
+        result = await self._repository.check_action(principal, execution_id, request)
+        await self._publish(
+            principal,
+            (
+                ControlEventType.EXECUTION_BLOCKED
+                if result.decision is RuntimeDecision.BLOCK
+                else ControlEventType.EXECUTION_UPDATED
+            ),
+            execution_id,
+        )
+        return result
 
     async def preflight(
         self,
@@ -77,7 +97,7 @@ class RuntimeService:
             execution.model,
             self._default_context_window_tokens,
         )
-        return await self._repository.record_preflight(
+        result = await self._repository.record_preflight(
             principal,
             execution,
             request,
@@ -85,6 +105,16 @@ class RuntimeService:
             safety_margin_tokens=self._context_safety_margin_tokens,
             warning_utilization=self._context_warning_utilization,
         )
+        await self._publish(
+            principal,
+            (
+                ControlEventType.EXECUTION_BLOCKED
+                if result.decision is RuntimeDecision.BLOCK
+                else ControlEventType.EXECUTION_UPDATED
+            ),
+            execution_id,
+        )
+        return result
 
     async def complete_action(
         self,
@@ -93,9 +123,15 @@ class RuntimeService:
         action_id: UUID,
         request: RuntimeActionCompleteRequest,
     ) -> RuntimeActionCompleted:
-        return await self._repository.complete_action(
+        result = await self._repository.complete_action(
             principal, execution_id, action_id, request
         )
+        await self._publish(
+            principal,
+            ControlEventType.EXECUTION_UPDATED,
+            execution_id,
+        )
+        return result
 
     async def get_intervention(
         self,
@@ -112,7 +148,13 @@ class RuntimeService:
         await self._repository.authorize_execution(principal, execution_id)
         await self._signals.request_cancellation(principal.project_id, execution_id)
         try:
-            return await self._repository.cancel(principal, execution_id)
+            result = await self._repository.cancel(principal, execution_id)
+            await self._publish(
+                principal,
+                ControlEventType.EXECUTION_CANCELLED,
+                execution_id,
+            )
+            return result
         except Exception:
             await self._signals.clear_cancellation(principal.project_id, execution_id)
             raise
@@ -133,6 +175,7 @@ class RuntimeService:
             RecoveryStrategy.MODEL_HANDOFF,
         }:
             if result.resumed_execution_id is None:
+                await self._publish_recovery(principal, result)
                 return result
             chat_request = self._recovery_runner.build_request(result, request)
             admission = await self.preflight(
@@ -144,10 +187,50 @@ class RuntimeService:
                 ),
             )
             if admission.decision is RuntimeDecision.BLOCK:
-                return await self._recovery_runner.block(result, admission.reason)
-            return await self._recovery_runner.run(
+                blocked = await self._recovery_runner.block(result, admission.reason)
+                await self._publish_recovery(principal, blocked)
+                return blocked
+            recovered = await self._recovery_runner.run(
                 result,
                 request,
                 chat_request,
             )
+            await self._publish_recovery(principal, recovered)
+            return recovered
+        await self._publish_recovery(principal, result)
         return result
+
+    async def _publish_recovery(
+        self,
+        principal: ApiKeyPrincipal,
+        result: RuntimeRecoveryResult,
+    ) -> None:
+        await self._publish(
+            principal,
+            ControlEventType.RECOVERY_UPDATED,
+            result.source_execution_id,
+        )
+        if result.resumed_execution_id is not None:
+            event_type = {
+                "blocked": ControlEventType.EXECUTION_BLOCKED,
+                "completed": ControlEventType.EXECUTION_COMPLETED,
+                "failed": ControlEventType.EXECUTION_FAILED,
+            }.get(result.status, ControlEventType.EXECUTION_UPDATED)
+            await self._publish(
+                principal,
+                event_type,
+                result.resumed_execution_id,
+            )
+
+    async def _publish(
+        self,
+        principal: ApiKeyPrincipal,
+        event_type: ControlEventType,
+        execution_id: UUID,
+    ) -> None:
+        if self._events is not None:
+            await self._events.publish(
+                principal.project_id,
+                event_type,
+                execution_id,
+            )

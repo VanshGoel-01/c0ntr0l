@@ -84,6 +84,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/events:
+    get:
+      tags:
+      - events
+      summary: Stream Control Events
+      operationId: streamControlEvents
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+            pattern: ^\d+-\d+$
+          - type: 'null'
+          title: Last-Event-Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/executions:
     get:
       tags:
@@ -643,6 +674,10 @@ components:
           type: boolean
           title: Stream
           default: false
+        stream_options:
+          anyOf:
+          - $ref: '#/components/schemas/StreamOptions'
+          - type: 'null'
         max_tokens:
           type: integer
           maximum: 4096.0
@@ -1792,6 +1827,14 @@ components:
       - started_at
       - completed_at
       title: SpanSummary
+    StreamOptions:
+      properties:
+        include_usage:
+          type: boolean
+          title: Include Usage
+          default: true
+      type: object
+      title: StreamOptions
     ToolCall:
       properties:
         id:

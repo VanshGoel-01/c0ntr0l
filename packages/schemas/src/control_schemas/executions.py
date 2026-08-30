@@ -1,8 +1,29 @@
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class ControlEventType(StrEnum):
+    EXECUTION_STARTED = "execution.started"
+    EXECUTION_UPDATED = "execution.updated"
+    EXECUTION_COMPLETED = "execution.completed"
+    EXECUTION_FAILED = "execution.failed"
+    EXECUTION_BLOCKED = "execution.blocked"
+    EXECUTION_CANCELLED = "execution.cancelled"
+    INCIDENT_UPDATED = "incident.updated"
+    RECOVERY_UPDATED = "recovery.updated"
+
+
+class ControlEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str = Field(pattern=r"^\d+-\d+$", max_length=64)
+    type: ControlEventType
+    execution_id: UUID | None = None
+    occurred_at: datetime
 
 
 class SpanSummary(BaseModel):

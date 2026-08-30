@@ -23,6 +23,7 @@ def test_checked_in_contract_matches_implemented_operations() -> None:
         ("/v1/chat/completions", "post"),
         ("/api/v1/executions", "get"),
         ("/api/v1/executions/{execution_id}", "get"),
+        ("/api/v1/events", "get"),
         ("/api/v1/workspace", "get"),
         ("/api/v1/incidents", "get"),
         ("/api/v1/incidents/{incident_id}", "patch"),
@@ -60,8 +61,8 @@ def test_contract_documents_authentication_and_current_streaming_default() -> No
         is False
     )
     assert (
-        contract["paths"][
-            "/api/v1/runtime/executions/{execution_id}/actions/check"
-        ]["post"]["operationId"]
+        contract["paths"]["/api/v1/runtime/executions/{execution_id}/actions/check"][
+            "post"
+        ]["operationId"]
         == "checkRuntimeAction"
     )
