@@ -9,19 +9,19 @@ function percent(value: number, limit: number | null): number | null {
 }
 
 export function BudgetsView({ executions, workspace, modelPolicies }: { executions: Execution[]; workspace: WorkspaceContext; modelPolicies: Record<string, ModelPolicy> }) {
-  const requests = workspace.requests24h || executions.length;
-  const tokens = workspace.tokens24h || executions.reduce((sum, run) => sum + run.totalTokens, 0);
-  const cost = workspace.cost24h || executions.reduce((sum, run) => sum + run.totalCost, 0);
+  const requests = workspace.requests24h;
+  const tokens = workspace.tokens24h;
+  const cost = workspace.cost24h;
   const primary = workspace.budgets.find((budget) => budget.isEnabled);
   const requestPercent = percent(requests, primary?.maxRequests ?? null);
   const tokenPercent = percent(tokens, primary?.maxTokens ?? null);
   const models = deriveModelStats(executions);
 
-  return <div className="module-view view-enter"><div className="page-intro"><div><h2>Budgets</h2><p>Observed usage compared with workspace budgets and model-level call limits.</p></div><span className="policy-seal"><ShieldCheck size={16} />Zero-cost routes</span></div>
+  return <div className="module-view view-enter"><div className="page-intro"><div><h2>Budgets</h2><p>Observed usage compared with workspace budgets and model-level call limits.</p></div><span className="policy-seal"><ShieldCheck size={16} />Server enforced</span></div>
     <section className="metric-strip budget-metrics">
       <article><span className="metric-icon indigo"><Gauge size={18} /></span><div><span>Requests</span><strong>{requests.toLocaleString()}</strong><small>{primary?.maxRequests ? `${Math.max(0, primary.maxRequests - requests).toLocaleString()} left` : "No request limit"}</small></div></article>
       <article><span className="metric-icon blue"><FileWarning size={18} /></span><div><span>Tokens</span><strong>{formatTokens(tokens)}</strong><small>{primary?.maxTokens ? `${formatTokens(Math.max(0, primary.maxTokens - tokens))} left` : "No token limit"}</small></div></article>
-      <article><span className="metric-icon cream"><CircleDollarSign size={18} /></span><div><span>Provider spend</span><strong>${cost.toFixed(2)}</strong><small>No paid provider enabled</small></div></article>
+      <article><span className="metric-icon cream"><CircleDollarSign size={18} /></span><div><span>Provider spend</span><strong>${cost.toFixed(2)}</strong><small>Recorded usage ledger</small></div></article>
       <article><span className="metric-icon magenta"><ShieldCheck size={18} /></span><div><span>Policies</span><strong>{workspace.budgets.filter((budget) => budget.isEnabled).length}</strong><small>{workspace.budgets.filter((budget) => budget.mode === "enforce").length} enforced</small></div></article>
     </section>
     <section className="panel utilization-panel"><div className="panel-heading"><div><h2>Budget utilization</h2><p>Current 24-hour usage</p></div></div>{primary ? <div className="utilization-grid"><article><div><span>Request limit</span><strong>{requestPercent?.toFixed(1) ?? "--"}%</strong></div><progress max="100" value={requestPercent ?? 0} /><p>{requests.toLocaleString()} used / {primary.maxRequests?.toLocaleString() ?? "Unlimited"}</p></article><article><div><span>Token limit</span><strong>{tokenPercent?.toFixed(1) ?? "--"}%</strong></div><progress max="100" value={tokenPercent ?? 0} /><p>{tokens.toLocaleString()} used / {primary.maxTokens?.toLocaleString() ?? "Unlimited"}</p></article><article><div><span>Cost limit</span><strong>{primary.maxCost === null ? "Blocked" : `${percent(cost, primary.maxCost)?.toFixed(1)}%`}</strong></div><progress max="100" value={primary.maxCost ? percent(cost, primary.maxCost) ?? 0 : 0} /><p>{primary.maxCost === null ? "No cost allowance configured" : `$${cost.toFixed(2)} used / $${primary.maxCost.toFixed(2)}`}</p></article></div> : <div className="empty-state"><strong>No workspace policy</strong><span>Seed or configure a PostgreSQL budget policy to calculate utilization.</span></div>}</section>
