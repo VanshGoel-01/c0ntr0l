@@ -16,6 +16,7 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
   const [error, setError] = useState<string | null>(null);
   const latest = useRef(policies);
   const activeConnection = useRef(connection);
+  const saveQueue = useRef<Map<string, Promise<unknown>>>(new Map());
 
   const replacePolicies = useCallback((next: Record<string, ModelPolicy>) => {
     latest.current = next;
@@ -24,6 +25,7 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
 
   useEffect(() => {
     activeConnection.current = connection;
+    saveQueue.current.clear();
     replacePolicies({});
     setSavingKeys(new Set());
     if (!connection) {
@@ -57,8 +59,13 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
     replacePolicies({ ...latest.current, [key]: optimistic });
     setSavingKeys((current) => new Set(current).add(key));
     setError(null);
+    const previousSave = saveQueue.current.get(key) ?? Promise.resolve();
+    const save = previousSave
+      .catch(() => undefined)
+      .then(() => upsertModelPolicy(targetConnection, provider, model, optimistic));
+    saveQueue.current.set(key, save);
     try {
-      const saved = await upsertModelPolicy(connection, provider, model, optimistic);
+      const saved = await save;
       if (activeConnection.current === targetConnection && latest.current[key] === optimistic) {
         replacePolicies({ ...latest.current, [key]: { mode: saved.mode, tokenLimit: saved.token_limit } });
       }
@@ -73,11 +80,14 @@ export function useModelPolicies(connection: ConnectionConfig | null) {
       if (activeConnection.current === targetConnection) setError(message);
       throw caught;
     } finally {
-      setSavingKeys((current) => {
-        const next = new Set(current);
-        next.delete(key);
-        return next;
-      });
+      if (saveQueue.current.get(key) === save) {
+        saveQueue.current.delete(key);
+        setSavingKeys((current) => {
+          const next = new Set(current);
+          next.delete(key);
+          return next;
+        });
+      }
     }
   }, [connection, replacePolicies]);
 

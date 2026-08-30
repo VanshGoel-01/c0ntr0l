@@ -18,3 +18,6 @@ CREATE INDEX IF NOT EXISTS model_policies_project_idx
 
 COMMENT ON TABLE control.model_policies IS
     'Project-scoped model review and enforcement settings; no provider credentials are stored';
+
+COMMENT ON COLUMN control.model_policies.token_limit IS
+    'Optional per-call ceiling for projected input plus requested output tokens';

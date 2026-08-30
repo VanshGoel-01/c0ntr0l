@@ -1783,6 +1783,41 @@ components:
       - reason
       - decided_at
       title: RuntimeIntervention
+    RuntimeModelPolicyProjection:
+      properties:
+        policy_id:
+          type: string
+          format: uuid
+          title: Policy Id
+        provider:
+          type: string
+          title: Provider
+        model:
+          type: string
+          title: Model
+        mode:
+          $ref: '#/components/schemas/ModelPolicyMode'
+        projected_tokens:
+          type: integer
+          minimum: 0.0
+          title: Projected Tokens
+        token_limit:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Token Limit
+        triggered:
+          type: boolean
+          title: Triggered
+      type: object
+      required:
+      - policy_id
+      - provider
+      - model
+      - mode
+      - projected_tokens
+      - triggered
+      title: RuntimeModelPolicyProjection
     RuntimePolicyMode:
       type: string
       enum:
@@ -1859,6 +1894,10 @@ components:
             $ref: '#/components/schemas/RuntimeBudgetProjection'
           type: array
           title: Budgets
+        model_policy:
+          anyOf:
+          - $ref: '#/components/schemas/RuntimeModelPolicyProjection'
+          - type: 'null'
         checkpoint_id:
           anyOf:
           - type: string

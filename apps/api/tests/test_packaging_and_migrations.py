@@ -32,7 +32,9 @@ def test_runtime_recovery_schema_preserves_checkpoint_and_audit_history() -> Non
         ROOT / "migrations" / "postgres" / "070_runtime_recovery.sql"
     ).read_text(encoding="utf-8")
 
-    assert "CREATE TABLE IF NOT EXISTS control.continuity_checkpoints" in recovery_schema
+    assert (
+        "CREATE TABLE IF NOT EXISTS control.continuity_checkpoints" in recovery_schema
+    )
     assert "CREATE TABLE IF NOT EXISTS control.recovery_attempts" in recovery_schema
     assert "raw provider context are forbidden" in recovery_schema
 
@@ -65,3 +67,12 @@ def test_model_policies_are_project_scoped_and_auditable() -> None:
     assert "UNIQUE (project_id, provider, model)" in policy_schema
     assert "CHECK (mode IN ('observe', 'warn', 'block'))" in policy_schema
     assert "'model_policy.updated'" in repository
+
+    decision_schema = (
+        ROOT / "migrations" / "postgres" / "110_model_policy_decisions.sql"
+    ).read_text(encoding="utf-8")
+    runtime_repository = (
+        ROOT / "apps" / "api" / "app" / "repositories" / "runtime.py"
+    ).read_text(encoding="utf-8")
+    assert "model_policy_id" in decision_schema
+    assert "_preflight_model_policy" in runtime_repository
