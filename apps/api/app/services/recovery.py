@@ -1,7 +1,12 @@
 import hashlib
 import time
 
-from control_schemas import ChatRequest, RuntimeRecoveryRequest, RuntimeRecoveryResult
+from control_schemas import (
+    ChatRequest,
+    RuntimeCheckpoint,
+    RuntimeRecoveryRequest,
+    RuntimeRecoveryResult,
+)
 
 from app.domain.recovery import build_recovery_chat_request
 from app.providers.errors import ProviderError
@@ -47,6 +52,7 @@ class RecoveryRunner:
             update={
                 "status": "blocked",
                 "message": f"Recovery was blocked before provider invocation: {reason}",
+                "checkpoint": self._available_checkpoint(prepared),
             }
         )
 
@@ -82,6 +88,7 @@ class RecoveryRunner:
                         f"Recovery could not continue because provider '{provider}' "
                         f"reported {error.code}."
                     ),
+                    "checkpoint": self._available_checkpoint(prepared),
                 }
             )
 
@@ -111,3 +118,9 @@ class RecoveryRunner:
     @staticmethod
     def _elapsed_ms(started_at: float) -> int:
         return max(0, round((time.perf_counter() - started_at) * 1000))
+
+    @staticmethod
+    def _available_checkpoint(prepared: RuntimeRecoveryResult) -> RuntimeCheckpoint:
+        return prepared.checkpoint.model_copy(
+            update={"status": "available", "consumed_at": None}
+        )

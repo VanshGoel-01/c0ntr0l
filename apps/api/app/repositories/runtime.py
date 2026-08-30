@@ -1130,7 +1130,9 @@ class RuntimeRepository:
                         {
                             "modified_arguments": sanitize_value(
                                 request.modified_arguments or {}
-                            )
+                            ),
+                            "source_status": source["status"],
+                            "source_final_reason": source["final_reason"],
                         }
                     ),
                     "now": now,

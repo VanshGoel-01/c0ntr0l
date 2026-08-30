@@ -35,7 +35,11 @@ def test_third_no_progress_repeat_warns_and_fourth_is_blocked() -> None:
     three_calls = [history_item(operation, result, False) for _ in range(3)]
 
     warning = evaluate_loop(
-        operation, two_calls, threshold=3, window_size=12, mode=RuntimePolicyMode.ENFORCE
+        operation,
+        two_calls,
+        threshold=3,
+        window_size=12,
+        mode=RuntimePolicyMode.ENFORCE,
     )
     blocked = evaluate_loop(
         operation,

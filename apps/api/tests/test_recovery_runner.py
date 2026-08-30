@@ -157,6 +157,8 @@ async def test_unconfigured_provider_is_recorded_as_failed() -> None:
     result = await runner.run(prepared_result("paid-cloud"), request)
 
     assert result.status == "failed"
+    assert result.checkpoint.status == "available"
+    assert result.checkpoint.consumed_at is None
     assert "provider_not_configured" in result.message
     assert repository.failed is not None
     assert repository.completed is None
@@ -205,4 +207,6 @@ async def test_recovery_runner_records_preflight_block() -> None:
     result = await runner.block(prepared_result(), "Budget exhausted")
 
     assert result.status == "blocked"
+    assert result.checkpoint.status == "available"
+    assert result.checkpoint.consumed_at is None
     assert repository.blocked == (RESUMED_ID, "Budget exhausted")

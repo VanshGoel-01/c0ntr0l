@@ -23,9 +23,10 @@ class IncidentRepository:
     ) -> list[IncidentContext]:
         async with self._database.connect() as connection:
             rows = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT incident.id, incident.execution_id,
                                COALESCE(execution.request_id::text, execution.id::text)
                                    AS trace_id,
@@ -48,14 +49,17 @@ class IncidentRepository:
                         ORDER BY incident.created_at DESC, incident.id
                         LIMIT :limit
                         """
-                    ),
-                    {
-                        "project_id": project_id,
-                        "status": status.value if status else None,
-                        "limit": limit,
-                    },
+                        ),
+                        {
+                            "project_id": project_id,
+                            "status": status.value if status else None,
+                            "limit": limit,
+                        },
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
         return [IncidentContext.model_validate(dict(row)) for row in rows]
 
     async def update_status(
@@ -66,9 +70,10 @@ class IncidentRepository:
     ) -> IncidentContext:
         async with self._database.begin() as connection:
             row = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         UPDATE control.incidents incident
                         SET status = :status,
                             acknowledged_at = CASE
@@ -101,14 +106,17 @@ class IncidentRepository:
                                   incident.created_at, incident.acknowledged_at,
                                   incident.resolved_at
                         """
-                    ),
-                    {
-                        "incident_id": incident_id,
-                        "project_id": project_id,
-                        "status": status.value,
-                    },
+                        ),
+                        {
+                            "incident_id": incident_id,
+                            "project_id": project_id,
+                            "status": status.value,
+                        },
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
         if row is None:
             raise IncidentNotFoundError
         return IncidentContext.model_validate(dict(row))

@@ -13,9 +13,10 @@ class WorkspaceRepository:
     async def get(self, project_id: UUID) -> WorkspaceContext | None:
         async with self._database.connect() as connection:
             workspace_row = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT organization.id AS organization_id,
                                organization.name AS organization_name,
                                project.id AS project_id,
@@ -41,10 +42,13 @@ class WorkspaceRepository:
                         GROUP BY organization.id, organization.name,
                                  project.id, project.slug, project.name
                         """
-                    ),
-                    {"project_id": project_id},
+                        ),
+                        {"project_id": project_id},
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
             if workspace_row is None:
                 return None
 
@@ -82,6 +86,10 @@ class WorkspaceRepository:
 
         return WorkspaceContext(
             **dict(workspace_row),
-            applications=[ApplicationContext.model_validate(dict(row)) for row in application_rows],
-            budgets=[BudgetPolicyContext.model_validate(dict(row)) for row in budget_rows],
+            applications=[
+                ApplicationContext.model_validate(dict(row)) for row in application_rows
+            ],
+            budgets=[
+                BudgetPolicyContext.model_validate(dict(row)) for row in budget_rows
+            ],
         )
