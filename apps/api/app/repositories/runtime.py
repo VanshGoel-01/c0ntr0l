@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from control_schemas import (
     ContinuityPacket,
+    ModelPolicyMode,
     RecoveryStrategy,
     RuntimeActionCheckRequest,
     RuntimeActionCompleted,
@@ -27,6 +28,7 @@ from sqlalchemy import text
 from app.domain.auth import ApiKeyPrincipal
 from app.domain.preflight import (
     BudgetSnapshot,
+    ModelPolicySnapshot,
     PreflightAssessment,
     PreflightExecution,
     evaluate_preflight,
@@ -103,9 +105,10 @@ class RuntimeRepository:
         }
         async with self._database.begin() as connection:
             row = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         INSERT INTO control.executions (
                             request_id, organization_id, project_id,
                             application_id, agent_id, status, requested_model,
@@ -129,20 +132,23 @@ class RuntimeRepository:
                         )
                         RETURNING id, request_id, status
                         """
-                    ),
-                    {
-                        "request_id": request_id,
-                        "organization_id": principal.organization_id,
-                        "project_id": principal.project_id,
-                        "application_slug": request.application_slug,
-                        "agent_slug": request.agent_slug,
-                        "model": request.model,
-                        "provider": request.provider,
-                        "input_fingerprint": fingerprint(task),
-                        "metadata": json.dumps(metadata),
-                    },
+                        ),
+                        {
+                            "request_id": request_id,
+                            "organization_id": principal.organization_id,
+                            "project_id": principal.project_id,
+                            "application_slug": request.application_slug,
+                            "agent_slug": request.agent_slug,
+                            "model": request.model,
+                            "provider": request.provider,
+                            "input_fingerprint": fingerprint(task),
+                            "metadata": json.dumps(metadata),
+                        },
+                    )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
             await connection.execute(
                 text(
                     """
@@ -179,22 +185,26 @@ class RuntimeRepository:
     ) -> PreflightExecution:
         async with self._database.connect() as connection:
             execution = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT id, status, organization_id, project_id, user_id,
                                application_id, agent_id, active_provider,
                                active_model, requested_model
                         FROM control.executions
                         WHERE id = :execution_id AND project_id = :project_id
                         """
-                    ),
-                    {
-                        "execution_id": execution_id,
-                        "project_id": principal.project_id,
-                    },
+                        ),
+                        {
+                            "execution_id": execution_id,
+                            "project_id": principal.project_id,
+                        },
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
             if execution is None:
                 raise RuntimeExecutionNotFoundError
             if execution["status"] != "running":
@@ -234,9 +244,16 @@ class RuntimeRepository:
             budgets = await self._preflight_budget_snapshots(
                 connection, locked, execution.execution_id
             )
+            model_policy = await self._preflight_model_policy(
+                connection,
+                principal.project_id,
+                execution.provider,
+                execution.model,
+            )
             assessment = evaluate_preflight(
                 request,
                 budgets,
+                model_policy=model_policy,
                 context_window_tokens=context_window_tokens,
                 safety_margin_tokens=safety_margin_tokens,
                 warning_utilization=warning_utilization,
@@ -252,6 +269,11 @@ class RuntimeRepository:
                 "budgets": [
                     budget.model_dump(mode="json") for budget in assessment.budgets
                 ],
+                "model_policy": (
+                    assessment.model_policy.model_dump(mode="json")
+                    if assessment.model_policy is not None
+                    else None
+                ),
             }
             now = await self._database_now(connection)
             blocked = assessment.decision is RuntimeDecision.BLOCK
@@ -288,7 +310,9 @@ class RuntimeRepository:
                                 "sequence_no": locked["next_sequence_no"],
                                 "status": "blocked" if blocked else "completed",
                                 "now": now,
-                                "error_code": "model_preflight_block" if blocked else None,
+                                "error_code": "model_preflight_block"
+                                if blocked
+                                else None,
                                 "attributes": json.dumps(evidence),
                             },
                         )
@@ -303,12 +327,13 @@ class RuntimeRepository:
                                 """
                                 INSERT INTO control.policy_decisions (
                                     execution_id, triggering_span_id,
-                                    budget_policy_id, policy_code,
+                                    budget_policy_id, model_policy_id, policy_code,
                                     policy_version, mode, outcome,
                                     final_execution_state, evidence
                                 ) VALUES (
                                     :execution_id, :span_id, :budget_policy_id,
-                                    'model_preflight', '1.0', :mode, :outcome,
+                                    :model_policy_id, 'model_preflight', '1.1',
+                                    :mode, :outcome,
                                     :final_state, CAST(:evidence AS jsonb)
                                 )
                                 RETURNING id
@@ -318,6 +343,11 @@ class RuntimeRepository:
                                 "execution_id": execution.execution_id,
                                 "span_id": span_id,
                                 "budget_policy_id": assessment.blocking_policy_id,
+                                "model_policy_id": (
+                                    assessment.model_policy.policy_id
+                                    if assessment.model_policy is not None
+                                    else None
+                                ),
                                 "mode": assessment.mode.value,
                                 "outcome": assessment.decision.value,
                                 "final_state": "blocked" if blocked else "running",
@@ -424,6 +454,7 @@ class RuntimeRepository:
             context_remaining_tokens=assessment.context_remaining_tokens,
             context_utilization=assessment.context_utilization,
             budgets=assessment.budgets,
+            model_policy=assessment.model_policy,
             checkpoint_id=checkpoint_id,
         )
 
@@ -448,9 +479,10 @@ class RuntimeRepository:
             window_size = int(policy.get("window_size", 12))
             mode = RuntimePolicyMode(policy.get("mode", RuntimePolicyMode.ENFORCE))
             history_rows = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT operation_fingerprint, attributes
                         FROM control.spans
                         WHERE execution_id = :execution_id
@@ -459,10 +491,13 @@ class RuntimeRepository:
                         ORDER BY sequence_no DESC
                         LIMIT :window_size
                         """
-                    ),
-                    {"execution_id": execution_id, "window_size": window_size},
+                        ),
+                        {"execution_id": execution_id, "window_size": window_size},
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
             history = [
                 ActionHistoryItem(
                     operation_fingerprint=row["operation_fingerprint"],
@@ -473,9 +508,7 @@ class RuntimeRepository:
                 )
                 for row in reversed(history_rows)
             ]
-            evaluation = evaluate_loop(
-                operation, history, threshold, window_size, mode
-            )
+            evaluation = evaluate_loop(operation, history, threshold, window_size, mode)
             observation_occurrence = int(
                 (
                     await connection.execute(
@@ -496,9 +529,7 @@ class RuntimeRepository:
             )
             sequence_no = int(execution["next_sequence_no"])
             span_status = (
-                "blocked"
-                if evaluation.decision is RuntimeDecision.BLOCK
-                else "running"
+                "blocked" if evaluation.decision is RuntimeDecision.BLOCK else "running"
             )
             span_kind = "tool" if request.kind == "tool" else "provider"
             attributes = {
@@ -533,10 +564,14 @@ class RuntimeRepository:
                                 "sequence_no": sequence_no,
                                 "kind": span_kind,
                                 "name": request.name,
-                                "tool_name": request.name if span_kind == "tool" else None,
+                                "tool_name": request.name
+                                if span_kind == "tool"
+                                else None,
                                 "status": span_status,
                                 "operation_fingerprint": operation,
-                                "completed_at": now if span_status == "blocked" else None,
+                                "completed_at": now
+                                if span_status == "blocked"
+                                else None,
                                 "duration_ms": 0 if span_status == "blocked" else None,
                                 "error_code": (
                                     "max_tool_repeats"
@@ -653,9 +688,10 @@ class RuntimeRepository:
             if execution["status"] != "running":
                 raise RuntimeExecutionNotActiveError(execution["status"])
             span = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT id, started_at
                         FROM control.spans
                         WHERE execution_id = :execution_id
@@ -664,10 +700,13 @@ class RuntimeRepository:
                           AND kind IN ('tool', 'provider')
                         FOR UPDATE
                         """
-                    ),
-                    {"execution_id": execution_id, "action_id": action_id},
+                        ),
+                        {"execution_id": execution_id, "action_id": action_id},
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
             if span is None:
                 raise RuntimeActionNotFoundError
             duration_ms = max(
@@ -690,7 +729,9 @@ class RuntimeRepository:
                     "status": request.status,
                     "completed_at": now,
                     "duration_ms": duration_ms,
-                    "error_code": "action_failed" if request.status == "failed" else None,
+                    "error_code": "action_failed"
+                    if request.status == "failed"
+                    else None,
                     "attributes": json.dumps(
                         {
                             "result_fingerprint": result_hash,
@@ -713,23 +754,31 @@ class RuntimeRepository:
     ) -> RuntimeIntervention | None:
         async with self._database.connect() as connection:
             execution = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT status
                         FROM control.executions
                         WHERE id = :execution_id AND project_id = :project_id
                         """
-                    ),
-                    {"execution_id": execution_id, "project_id": principal.project_id},
+                        ),
+                        {
+                            "execution_id": execution_id,
+                            "project_id": principal.project_id,
+                        },
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
             if execution is None:
                 raise RuntimeExecutionNotFoundError
             decision = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT policy_code, mode, outcome, evidence, decided_at
                         FROM control.policy_decisions
                         WHERE execution_id = :execution_id
@@ -737,16 +786,20 @@ class RuntimeRepository:
                         ORDER BY decided_at DESC
                         LIMIT 1
                         """
-                    ),
-                    {"execution_id": execution_id},
+                        ),
+                        {"execution_id": execution_id},
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
             if decision is None:
                 return None
             checkpoint_row = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT id, execution_id, status, content_fingerprint,
                                packet, created_at, consumed_at
                         FROM control.continuity_checkpoints
@@ -754,10 +807,13 @@ class RuntimeRepository:
                         ORDER BY created_at DESC
                         LIMIT 1
                         """
-                    ),
-                    {"execution_id": execution_id},
+                        ),
+                        {"execution_id": execution_id},
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
         evidence = dict(decision["evidence"] or {})
         return RuntimeIntervention(
             execution_id=execution_id,
@@ -886,9 +942,10 @@ class RuntimeRepository:
             )
             now = await self._database_now(connection)
             checkpoint_row = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT id, execution_id, status, content_fingerprint,
                                packet, created_at, consumed_at
                         FROM control.continuity_checkpoints
@@ -898,10 +955,13 @@ class RuntimeRepository:
                         LIMIT 1
                         FOR UPDATE
                         """
-                    ),
-                    {"execution_id": execution_id},
+                        ),
+                        {"execution_id": execution_id},
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
             if checkpoint_row is None:
                 raise RuntimeRecoveryError("No available checkpoint exists")
             checkpoint = self._checkpoint_from_row(checkpoint_row)
@@ -934,14 +994,22 @@ class RuntimeRepository:
                     message="Execution remains stopped; the checkpoint is available for audit.",
                 )
 
-            target_provider = request.target_provider or source["active_provider"] or "custom"
-            target_model = request.target_model or source["active_model"] or source["requested_model"]
+            target_provider = (
+                request.target_provider or source["active_provider"] or "custom"
+            )
+            target_model = (
+                request.target_model
+                or source["active_model"]
+                or source["requested_model"]
+            )
             if (
                 request.strategy is RecoveryStrategy.MODEL_HANDOFF
                 and target_provider == source["active_provider"]
                 and target_model == source["active_model"]
             ):
-                raise RuntimeRecoveryError("A model handoff must select a different target")
+                raise RuntimeRecoveryError(
+                    "A model handoff must select a different target"
+                )
             resumed_id = uuid4()
             resumed_request_id = f"run_{uuid4().hex}"
             source_metadata = dict(source["metadata"] or {})
@@ -1059,7 +1127,11 @@ class RuntimeRepository:
                     "target_provider": target_provider,
                     "target_model": target_model,
                     "details": json.dumps(
-                        {"modified_arguments": sanitize_value(request.modified_arguments or {})}
+                        {
+                            "modified_arguments": sanitize_value(
+                                request.modified_arguments or {}
+                            )
+                        }
                     ),
                     "now": now,
                 },
@@ -1086,7 +1158,9 @@ class RuntimeRepository:
                     ),
                     {
                         "execution_id": execution_id,
-                        "metadata": json.dumps({"resumed_execution_id": str(resumed_id)}),
+                        "metadata": json.dumps(
+                            {"resumed_execution_id": str(resumed_id)}
+                        ),
                     },
                 )
             consumed_checkpoint = checkpoint.model_copy(
@@ -1107,9 +1181,10 @@ class RuntimeRepository:
 
     async def _locked_execution(self, connection, project_id: UUID, execution_id: UUID):  # type: ignore[no-untyped-def]
         row = (
-            await connection.execute(
-                text(
-                    """
+            (
+                await connection.execute(
+                    text(
+                        """
                     SELECT execution.*,
                            root.id AS root_span_id,
                            COALESCE((
@@ -1125,21 +1200,28 @@ class RuntimeRepository:
                       AND execution.project_id = :project_id
                     FOR UPDATE OF execution
                     """
-                ),
-                {"execution_id": execution_id, "project_id": project_id},
+                    ),
+                    {"execution_id": execution_id, "project_id": project_id},
+                )
             )
-        ).mappings().one_or_none()
+            .mappings()
+            .one_or_none()
+        )
         if row is None:
             raise RuntimeExecutionNotFoundError
         return row
 
     async def _preflight_budget_snapshots(
-        self, connection, execution, execution_id: UUID  # type: ignore[no-untyped-def]
+        self,
+        connection,
+        execution,
+        execution_id: UUID,  # type: ignore[no-untyped-def]
     ) -> list[BudgetSnapshot]:
         rows = (
-            await connection.execute(
-                text(
-                    """
+            (
+                await connection.execute(
+                    text(
+                        """
                     SELECT policy.id, policy.name, policy.scope_type,
                            policy.period_type, policy.mode,
                            policy.max_requests, policy.max_tokens,
@@ -1234,17 +1316,20 @@ class RuntimeRepository:
                       )
                     ORDER BY policy.scope_type, policy.name
                     """
-                ),
-                {
-                    "execution_id": execution_id,
-                    "organization_id": execution["organization_id"],
-                    "project_id": execution["project_id"],
-                    "user_id": execution["user_id"],
-                    "application_id": execution["application_id"],
-                    "agent_id": execution["agent_id"],
-                },
+                    ),
+                    {
+                        "execution_id": execution_id,
+                        "organization_id": execution["organization_id"],
+                        "project_id": execution["project_id"],
+                        "user_id": execution["user_id"],
+                        "application_id": execution["application_id"],
+                        "agent_id": execution["agent_id"],
+                    },
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         return [
             BudgetSnapshot(
                 policy_id=row["id"],
@@ -1261,6 +1346,41 @@ class RuntimeRepository:
             )
             for row in rows
         ]
+
+    @staticmethod
+    async def _preflight_model_policy(
+        connection,  # type: ignore[no-untyped-def]
+        project_id: UUID,
+        provider: str,
+        model: str,
+    ) -> ModelPolicySnapshot | None:
+        row = (
+            (
+                await connection.execute(
+                    text(
+                        """
+                    SELECT id, provider, model, mode, token_limit
+                    FROM control.model_policies
+                    WHERE project_id = :project_id
+                      AND provider = lower(:provider)
+                      AND model = :model
+                    """
+                    ),
+                    {"project_id": project_id, "provider": provider, "model": model},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        return ModelPolicySnapshot(
+            policy_id=row["id"],
+            provider=row["provider"],
+            model=row["model"],
+            mode=ModelPolicyMode(row["mode"]),
+            token_limit=row["token_limit"],
+        )
 
     @staticmethod
     async def _reserve_preflight_budget(
@@ -1442,9 +1562,7 @@ class RuntimeRepository:
                 "execution_id": execution["id"],
                 "policy_decision_id": policy_decision_id,
                 "span_id": action_id,
-                "evidence": json.dumps(
-                    {"reason": evaluation_reason, **evidence}
-                ),
+                "evidence": json.dumps({"reason": evaluation_reason, **evidence}),
             },
         )
         return await self._create_checkpoint(
@@ -1468,9 +1586,10 @@ class RuntimeRepository:
         now: datetime,
     ) -> UUID:
         completed_rows = (
-            await connection.execute(
-                text(
-                    """
+            (
+                await connection.execute(
+                    text(
+                        """
                     SELECT attributes->>'result_summary' AS summary
                     FROM control.spans
                     WHERE execution_id = :execution_id
@@ -1479,10 +1598,13 @@ class RuntimeRepository:
                       AND NULLIF(attributes->>'result_summary', '') IS NOT NULL
                     ORDER BY sequence_no
                     """
-                ),
-                {"execution_id": execution["id"]},
+                    ),
+                    {"execution_id": execution["id"]},
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         metadata = dict(execution["metadata"] or {})
         recommendation = self._recommendation(
             str(failed_operation.get("name", "action"))
@@ -1559,4 +1681,6 @@ class RuntimeRepository:
     def _recommendation(action_name: str) -> str:
         if "search" in action_name.lower():
             return "Broaden the query, change the source, or add a no-results exit condition."
-        return "Change the action arguments or add an explicit no-progress exit condition."
+        return (
+            "Change the action arguments or add an explicit no-progress exit condition."
+        )

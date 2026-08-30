@@ -11,6 +11,7 @@ from app.services.chat import ChatService
 from app.services.executions import ExecutionQueryService
 from app.services.health import HealthService
 from app.services.incidents import IncidentService
+from app.services.model_policies import ModelPolicyService
 from app.services.runtime import RuntimeService
 from app.services.workspace import WorkspaceService
 
@@ -39,6 +40,10 @@ def get_workspace_service(request: Request) -> WorkspaceService:
 
 def get_incident_service(request: Request) -> IncidentService:
     return request.app.state.incident_service
+
+
+def get_model_policy_service(request: Request) -> ModelPolicyService:
+    return request.app.state.model_policy_service
 
 
 def get_runtime_service(request: Request) -> RuntimeService:
