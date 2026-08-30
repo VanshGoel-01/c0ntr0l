@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -6,6 +8,7 @@ from control_schemas import (
     ChatCompletion,
     ExecutionDetail,
     ExecutionSummary,
+    RuntimeDecision,
     SpanSummary,
     UsageSummary,
 )
@@ -13,6 +16,7 @@ from sqlalchemy import text
 
 from app.domain.auth import ApiKeyPrincipal
 from app.domain.executions import ExecutionTrace
+from app.domain.preflight import ModelPolicyAssessment
 from app.infrastructure.database import Database
 from app.repositories.budget_reservations import (
     claim_budget_reservations,
@@ -153,7 +157,7 @@ class ExecutionRepository:
             provider_span_id = await self._insert_span(
                 connection,
                 execution_id=execution_id,
-                sequence_no=2,
+                sequence_no=3,
                 kind="provider",
                 name=f"{provider_name}.chat.completion",
                 parent_span_id=root_span_id,
@@ -328,6 +332,258 @@ class ExecutionRepository:
                     "error_code": error_code,
                 },
             )
+
+    async def record_model_policy(
+        self,
+        trace: ExecutionTrace,
+        model: str,
+        assessment: ModelPolicyAssessment,
+    ) -> UUID | None:
+        projection = assessment.projection
+        if projection is None:
+            return None
+        blocked = assessment.decision is RuntimeDecision.BLOCK
+        warned = assessment.decision is RuntimeDecision.WARN
+        evidence = {
+            "reason": assessment.reason,
+            "provider": trace.provider_name,
+            "model": model,
+            **projection.model_dump(mode="json"),
+        }
+        async with self._database.begin() as connection:
+            policy_span_id = await self._insert_span(
+                connection,
+                execution_id=trace.execution_id,
+                sequence_no=2,
+                kind="policy",
+                name="Chat model policy admission",
+                parent_span_id=trace.root_span_id,
+            )
+            now = datetime.now(UTC)
+            await self._finish_span(
+                connection,
+                policy_span_id,
+                "blocked" if blocked else "completed",
+                0,
+                now,
+                "model_policy_block" if blocked else None,
+            )
+            decision_id = UUID(
+                str(
+                    (
+                        await connection.execute(
+                            text(
+                                """
+                                INSERT INTO control.policy_decisions (
+                                    execution_id, triggering_span_id,
+                                    model_policy_id, policy_code, policy_version,
+                                    mode, outcome, final_execution_state, evidence
+                                ) VALUES (
+                                    :execution_id, :span_id, :model_policy_id,
+                                    'chat_model_policy', '1.0', :mode, :outcome,
+                                    :final_state, CAST(:evidence AS jsonb)
+                                )
+                                RETURNING id
+                                """
+                            ),
+                            {
+                                "execution_id": trace.execution_id,
+                                "span_id": policy_span_id,
+                                "model_policy_id": projection.policy_id,
+                                "mode": assessment.mode.value,
+                                "outcome": assessment.decision.value,
+                                "final_state": "blocked" if blocked else "running",
+                                "evidence": json.dumps(evidence),
+                            },
+                        )
+                    ).scalar_one()
+                )
+            )
+            if warned:
+                await self._insert_model_policy_incident(
+                    connection,
+                    trace.execution_id,
+                    decision_id,
+                    policy_span_id,
+                    "warning",
+                    "Model policy warning",
+                    evidence,
+                )
+            if not blocked:
+                return None
+
+            await connection.execute(
+                text(
+                    """
+                    UPDATE control.provider_attempts
+                    SET status = 'skipped', completed_at = :completed_at,
+                        retryable = false, error_category = 'model_policy_block'
+                    WHERE id = :attempt_id
+                    """
+                ),
+                {"attempt_id": trace.provider_attempt_id, "completed_at": now},
+            )
+            await reconcile_budget_reservations(
+                connection,
+                trace.execution_id,
+                actual_tokens=0,
+                actual_cost=Decimal(0),
+                now=now,
+            )
+            await self._finish_span(
+                connection,
+                trace.provider_span_id,
+                "blocked",
+                0,
+                now,
+                "model_policy_block",
+            )
+            await self._finish_span(
+                connection,
+                trace.root_span_id,
+                "blocked",
+                0,
+                now,
+                "model_policy_block",
+            )
+            await connection.execute(
+                text(
+                    """
+                    UPDATE control.executions
+                    SET status = 'blocked', completed_at = :completed_at,
+                        final_reason = 'policy_block',
+                        error_code = 'model_policy_block',
+                        metadata = metadata || CAST(:metadata AS jsonb)
+                    WHERE id = :execution_id
+                    """
+                ),
+                {
+                    "execution_id": trace.execution_id,
+                    "completed_at": now,
+                    "metadata": json.dumps(
+                        {
+                            "recovery_state": "checkpointed",
+                            "preflight_reason": assessment.reason,
+                        }
+                    ),
+                },
+            )
+            checkpoint_id = await self._insert_model_policy_checkpoint(
+                connection,
+                trace,
+                model,
+                decision_id,
+                assessment,
+                evidence,
+                now,
+            )
+            await self._insert_model_policy_incident(
+                connection,
+                trace.execution_id,
+                decision_id,
+                policy_span_id,
+                "critical",
+                "Model call blocked",
+                evidence,
+            )
+            return checkpoint_id
+
+    @staticmethod
+    async def _insert_model_policy_incident(
+        connection,  # type: ignore[no-untyped-def]
+        execution_id: UUID,
+        decision_id: UUID,
+        span_id: UUID,
+        severity: str,
+        title: str,
+        evidence: dict[str, object],
+    ) -> None:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO control.incidents (
+                    execution_id, policy_decision_id, triggering_span_id,
+                    incident_type, severity, title, evidence
+                ) VALUES (
+                    :execution_id, :decision_id, :span_id,
+                    'manual_intervention', :severity, :title,
+                    CAST(:evidence AS jsonb)
+                )
+                """
+            ),
+            {
+                "execution_id": execution_id,
+                "decision_id": decision_id,
+                "span_id": span_id,
+                "severity": severity,
+                "title": title,
+                "evidence": json.dumps(evidence),
+            },
+        )
+
+    @staticmethod
+    async def _insert_model_policy_checkpoint(
+        connection,  # type: ignore[no-untyped-def]
+        trace: ExecutionTrace,
+        model: str,
+        decision_id: UUID,
+        assessment: ModelPolicyAssessment,
+        evidence: dict[str, object],
+        now: datetime,
+    ) -> UUID:
+        projection = assessment.projection
+        if projection is None:
+            raise ValueError("A blocked admission requires a model policy projection")
+        packet = {
+            "version": "1.0",
+            "task": f"Complete a chat request with {model}",
+            "source_execution_id": str(trace.execution_id),
+            "source_provider": trace.provider_name,
+            "source_model": model,
+            "completed_work": [],
+            "failed_operation": {
+                "name": "chat.completion",
+                "arguments": {
+                    "provider": trace.provider_name,
+                    "model": model,
+                    "projected_tokens": projection.projected_tokens,
+                },
+            },
+            "reason_for_intervention": assessment.reason,
+            "recommended_action": (
+                "Select an allowed model, reduce max_tokens, or update the project policy"
+            ),
+            "evidence": evidence,
+            "created_at": now.isoformat(),
+        }
+        canonical = json.dumps(packet, sort_keys=True, separators=(",", ":"))
+        fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return UUID(
+            str(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            INSERT INTO control.continuity_checkpoints (
+                                execution_id, policy_decision_id,
+                                content_fingerprint, packet
+                            ) VALUES (
+                                :execution_id, :decision_id,
+                                :fingerprint, CAST(:packet AS jsonb)
+                            )
+                            RETURNING id
+                            """
+                        ),
+                        {
+                            "execution_id": trace.execution_id,
+                            "decision_id": decision_id,
+                            "fingerprint": fingerprint,
+                            "packet": json.dumps(packet),
+                        },
+                    )
+                ).scalar_one()
+            )
+        )
 
     async def list_recent(self, project_id: UUID, limit: int) -> list[ExecutionSummary]:
         async with self._database.connect() as connection:

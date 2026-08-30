@@ -17,6 +17,7 @@ from app.providers.registry import ProviderRegistry
 from app.repositories.api_keys import ApiKeyRepository
 from app.repositories.executions import ExecutionRepository
 from app.repositories.incidents import IncidentRepository
+from app.repositories.model_policies import ModelPolicyRepository
 from app.repositories.recovery import RecoveryRepository
 from app.repositories.runtime import RuntimeRepository
 from app.repositories.workspace import WorkspaceRepository
@@ -25,6 +26,7 @@ from app.services.chat import ChatService
 from app.services.executions import ExecutionQueryService
 from app.services.health import HealthService
 from app.services.incidents import IncidentService
+from app.services.model_policies import ModelPolicyService
 from app.services.recovery import RecoveryRunner
 from app.services.runtime import RuntimeService
 from app.services.workspace import WorkspaceService
@@ -64,6 +66,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         settings.api_key_pepper.get_secret_value(),
     )
     execution_repository = ExecutionRepository(database)
+    model_policy_repository = ModelPolicyRepository(database)
     runtime_signals = RuntimeSignals(settings.redis_url)
     execution_events = ExecutionEvents(
         settings.redis_url,
@@ -71,11 +74,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         block_milliseconds=settings.event_stream_block_milliseconds,
     )
     chat_service = ChatService(
-        execution_repository, provider_registry, execution_events
+        execution_repository,
+        provider_registry,
+        execution_events,
+        model_policy_repository,
     )
     execution_query_service = ExecutionQueryService(execution_repository)
     workspace_service = WorkspaceService(WorkspaceRepository(database))
     incident_service = IncidentService(IncidentRepository(database), execution_events)
+    model_policy_service = ModelPolicyService(model_policy_repository)
     recovery_runner = RecoveryRunner(
         RecoveryRepository(database),
         provider_registry,
@@ -97,6 +104,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.execution_query_service = execution_query_service
     application.state.workspace_service = workspace_service
     application.state.incident_service = incident_service
+    application.state.model_policy_service = model_policy_service
     application.state.runtime_service = runtime_service
     application.state.execution_events = execution_events
     application.state.provider_registry = provider_registry

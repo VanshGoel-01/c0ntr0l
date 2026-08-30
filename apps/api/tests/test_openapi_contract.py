@@ -27,6 +27,8 @@ def test_checked_in_contract_matches_implemented_operations() -> None:
         ("/api/v1/workspace", "get"),
         ("/api/v1/incidents", "get"),
         ("/api/v1/incidents/{incident_id}", "patch"),
+        ("/api/v1/model-policies", "get"),
+        ("/api/v1/model-policies", "put"),
         ("/api/v1/providers", "get"),
         ("/api/v1/runtime/executions", "post"),
         ("/api/v1/runtime/executions/{execution_id}/preflight", "post"),
@@ -66,4 +68,10 @@ def test_contract_documents_authentication_and_current_streaming_default() -> No
             "post"
         ]["operationId"]
         == "checkRuntimeAction"
+    )
+    assert (
+        contract["paths"]["/v1/chat/completions"]["post"]["responses"]["403"][
+            "description"
+        ]
+        == "The project model policy blocked the provider call"
     )

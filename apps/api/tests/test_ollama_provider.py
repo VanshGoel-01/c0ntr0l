@@ -14,9 +14,7 @@ async def test_ollama_context_window_is_read_from_model_metadata() -> None:
             json={"model_info": {"gemma3.context_length": 131_072}},
         )
 
-    client = OllamaProviderClient(
-        "http://ollama.test", 1, MockTransport(handler)
-    )
+    client = OllamaProviderClient("http://ollama.test", 1, MockTransport(handler))
     try:
         context_window = await client.context_window("gemma3:1b")
     finally:
@@ -31,16 +29,10 @@ async def test_ollama_prefers_active_runtime_context() -> None:
         assert request.url.path == "/api/ps"
         return Response(
             200,
-            json={
-                "models": [
-                    {"name": "gemma3:1b", "context_length": 4_096}
-                ]
-            },
+            json={"models": [{"name": "gemma3:1b", "context_length": 4_096}]},
         )
 
-    client = OllamaProviderClient(
-        "http://ollama.test", 1, MockTransport(handler)
-    )
+    client = OllamaProviderClient("http://ollama.test", 1, MockTransport(handler))
     try:
         context_window = await client.context_window("gemma3:1b")
     finally:

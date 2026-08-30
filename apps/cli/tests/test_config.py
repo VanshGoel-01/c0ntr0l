@@ -1,5 +1,4 @@
 import pytest
-
 from control_cli.config import CliConfig, CliConfigurationError, normalize_api_url
 
 KEY = "ctl_" + "a" * 40

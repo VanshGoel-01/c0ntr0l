@@ -1,12 +1,12 @@
-from typing import Any, TypeVar
+from typing import Any, Self, TypeVar
 from uuid import UUID
 
 import httpx
 from control_schemas import (
     RecoveryStrategy,
     RuntimeActionCheckRequest,
-    RuntimeActionCompleteRequest,
     RuntimeActionCompleted,
+    RuntimeActionCompleteRequest,
     RuntimeActionDecision,
     RuntimeCancellationResult,
     RuntimeExecutionCreated,
@@ -45,7 +45,7 @@ class ControlRuntimeClient:
             timeout=timeout,
         )
 
-    async def __aenter__(self) -> "ControlRuntimeClient":
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -97,10 +97,7 @@ class ControlRuntimeClient:
     ) -> RuntimeActionCompleted:
         return await self._request(
             "POST",
-            (
-                f"/api/v1/runtime/executions/{execution_id}/actions/"
-                f"{action_id}/complete"
-            ),
+            (f"/api/v1/runtime/executions/{execution_id}/actions/{action_id}/complete"),
             RuntimeActionCompleted,
             json=request.model_dump(mode="json"),
         )
@@ -112,9 +109,7 @@ class ControlRuntimeClient:
             RuntimeIntervention,
         )
 
-    async def cancel_execution(
-        self, execution_id: UUID
-    ) -> RuntimeCancellationResult:
+    async def cancel_execution(self, execution_id: UUID) -> RuntimeCancellationResult:
         return await self._request(
             "POST",
             f"/api/v1/runtime/executions/{execution_id}/cancel",
@@ -167,9 +162,7 @@ class ControlRuntimeClient:
         try:
             return response_model.model_validate(response.json())
         except (ValueError, ValidationError) as exc:
-            raise ControlProtocolError(
-                f"Invalid response for {method} {path}"
-            ) from exc
+            raise ControlProtocolError(f"Invalid response for {method} {path}") from exc
 
 
 def _response_detail(response: httpx.Response) -> str:

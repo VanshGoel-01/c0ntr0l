@@ -15,7 +15,7 @@ from app.providers.errors import (
     ProviderTimeoutError,
     ProviderUnavailableError,
 )
-from app.services.chat import ChatService
+from app.services.chat import ChatPolicyBlockedError, ChatService
 
 router = APIRouter(prefix="/v1", tags=["chat"])
 PrincipalDependency = Annotated[ApiKeyPrincipal, Depends(get_principal)]
@@ -49,6 +49,11 @@ ProviderHeader = Annotated[
     "/chat/completions",
     operation_id="createChatCompletion",
     response_model=ChatCompletion,
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "description": "The project model policy blocked the provider call"
+        }
+    },
 )
 async def create_chat_completion(
     body: ChatRequest,
@@ -85,6 +90,7 @@ async def create_chat_completion(
                 headers={
                     "X-Control-Execution-Id": stream.execution_id,
                     "X-Control-Provider": stream.provider_name,
+                    "X-Control-Decision": stream.decision.value,
                     "Cache-Control": "no-store",
                     "X-Accel-Buffering": "no",
                 },
@@ -98,6 +104,18 @@ async def create_chat_completion(
             application_slug=application_slug,
             agent_slug=agent_slug,
         )
+    except ChatPolicyBlockedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=exc.reason,
+            headers={
+                "X-Control-Execution-Id": str(exc.execution_id),
+                "X-Control-Provider": exc.provider_name,
+                "X-Control-Decision": "block",
+                "X-Control-Checkpoint-Id": str(exc.checkpoint_id),
+                "Cache-Control": "no-store",
+            },
+        ) from exc
     except ProviderTimeoutError as exc:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -136,5 +154,6 @@ async def create_chat_completion(
 
     response.headers["X-Control-Execution-Id"] = result.execution_id
     response.headers["X-Control-Provider"] = result.provider_name
+    response.headers["X-Control-Decision"] = result.decision.value
     response.headers["Cache-Control"] = "no-store"
     return result.completion

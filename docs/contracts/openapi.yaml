@@ -87,6 +87,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatCompletion'
+        '403':
+          description: The project model policy blocked the provider call
         '422':
           description: Validation Error
           content:
@@ -264,6 +266,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/model-policies:
+    get:
+      tags:
+      - model-policies
+      summary: List Model Policies
+      operationId: listModelPolicies
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ModelPolicyContext'
+                type: array
+                title: Response Listmodelpolicies
+      security:
+      - bearerAuth: []
+    put:
+      tags:
+      - model-policies
+      summary: Upsert Model Policy
+      operationId: upsertModelPolicy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelPolicyUpsert'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelPolicyContext'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - bearerAuth: []
   /api/v1/providers:
     get:
       tags:
@@ -1212,6 +1258,87 @@ components:
       - assistant
       - tool
       title: MessageRole
+    ModelPolicyContext:
+      properties:
+        provider:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9][a-z0-9_-]{0,62}$
+          title: Provider
+        model:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Model
+        mode:
+          $ref: '#/components/schemas/ModelPolicyMode'
+          default: observe
+        token_limit:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Token Limit
+        id:
+          type: string
+          format: uuid
+          title: Id
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - provider
+      - model
+      - id
+      - project_id
+      - created_at
+      - updated_at
+      title: ModelPolicyContext
+    ModelPolicyMode:
+      type: string
+      enum:
+      - observe
+      - warn
+      - block
+      title: ModelPolicyMode
+    ModelPolicyUpsert:
+      properties:
+        provider:
+          type: string
+          maxLength: 63
+          minLength: 1
+          pattern: ^[a-z0-9][a-z0-9_-]{0,62}$
+          title: Provider
+        model:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Model
+        mode:
+          $ref: '#/components/schemas/ModelPolicyMode'
+          default: observe
+        token_limit:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Token Limit
+      type: object
+      required:
+      - provider
+      - model
+      title: ModelPolicyUpsert
     ProviderAvailability:
       type: string
       enum:
@@ -1577,8 +1704,9 @@ components:
           title: Model
         provider:
           type: string
-          maxLength: 64
+          maxLength: 63
           minLength: 1
+          pattern: ^[a-z0-9][a-z0-9_-]{0,62}$
           title: Provider
           default: custom
         application_slug:
@@ -1658,6 +1786,41 @@ components:
       - reason
       - decided_at
       title: RuntimeIntervention
+    RuntimeModelPolicyProjection:
+      properties:
+        policy_id:
+          type: string
+          format: uuid
+          title: Policy Id
+        provider:
+          type: string
+          title: Provider
+        model:
+          type: string
+          title: Model
+        mode:
+          $ref: '#/components/schemas/ModelPolicyMode'
+        projected_tokens:
+          type: integer
+          minimum: 0.0
+          title: Projected Tokens
+        token_limit:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Token Limit
+        triggered:
+          type: boolean
+          title: Triggered
+      type: object
+      required:
+      - policy_id
+      - provider
+      - model
+      - mode
+      - projected_tokens
+      - triggered
+      title: RuntimeModelPolicyProjection
     RuntimePolicyMode:
       type: string
       enum:
@@ -1734,6 +1897,10 @@ components:
             $ref: '#/components/schemas/RuntimeBudgetProjection'
           type: array
           title: Budgets
+        model_policy:
+          anyOf:
+          - $ref: '#/components/schemas/RuntimeModelPolicyProjection'
+          - type: 'null'
         checkpoint_id:
           anyOf:
           - type: string
