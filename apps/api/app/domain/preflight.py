@@ -44,6 +44,15 @@ class ModelPolicySnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelPolicyAssessment:
+    decision: RuntimeDecision
+    mode: RuntimePolicyMode
+    reason: str
+    projection: RuntimeModelPolicyProjection | None
+    blocking_policy_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PreflightAssessment:
     decision: RuntimeDecision
     mode: RuntimePolicyMode
@@ -72,7 +81,12 @@ def evaluate_preflight(
     remaining = max(0, context_window_tokens - projected_context)
     utilization = projected_context / context_window_tokens
     projections = [_project_budget(snapshot, request) for snapshot in budgets]
-    model_projection = _project_model_policy(model_policy, request)
+    model_assessment = evaluate_model_policy(
+        model_policy,
+        input_tokens=request.input_tokens,
+        requested_output_tokens=request.requested_output_tokens,
+    )
+    model_projection = model_assessment.projection
 
     if projected_context > context_window_tokens:
         return PreflightAssessment(
@@ -86,26 +100,17 @@ def evaluate_preflight(
             model_policy=model_projection,
         )
 
-    if (
-        model_projection is not None
-        and model_projection.triggered
-        and model_projection.mode is ModelPolicyMode.BLOCK
-    ):
-        reason = (
-            "Model is blocked by the project policy"
-            if model_projection.token_limit is None
-            else "Projected request exceeds the model token limit"
-        )
+    if model_assessment.decision is RuntimeDecision.BLOCK:
         return PreflightAssessment(
             decision=RuntimeDecision.BLOCK,
             mode=RuntimePolicyMode.ENFORCE,
-            reason=reason,
+            reason=model_assessment.reason,
             projected_context_tokens=projected_context,
             context_remaining_tokens=remaining,
             context_utilization=utilization,
             budgets=projections,
             model_policy=model_projection,
-            blocking_model_policy_id=model_projection.policy_id,
+            blocking_model_policy_id=model_assessment.blocking_policy_id,
         )
 
     enforced = next(
@@ -137,17 +142,9 @@ def evaluate_preflight(
         ),
         None,
     )
-    if (
-        model_projection is not None
-        and model_projection.triggered
-        and model_projection.mode is ModelPolicyMode.WARN
-    ):
+    if model_assessment.decision is RuntimeDecision.WARN:
         decision = RuntimeDecision.WARN
-        reason = (
-            "Model requires review by the project policy"
-            if model_projection.token_limit is None
-            else "Projected request exceeds the model warning limit"
-        )
+        reason = model_assessment.reason
         mode = RuntimePolicyMode.WARN
     elif warned is not None:
         decision = RuntimeDecision.WARN
@@ -174,20 +171,27 @@ def evaluate_preflight(
     )
 
 
-def _project_model_policy(
+def evaluate_model_policy(
     snapshot: ModelPolicySnapshot | None,
-    request: RuntimePreflightRequest,
-) -> RuntimeModelPolicyProjection | None:
+    *,
+    input_tokens: int,
+    requested_output_tokens: int,
+) -> ModelPolicyAssessment:
     if snapshot is None:
-        return None
-    projected_tokens = request.input_tokens + request.requested_output_tokens
+        return ModelPolicyAssessment(
+            decision=RuntimeDecision.ALLOW,
+            mode=RuntimePolicyMode.OBSERVE,
+            reason="No model policy is configured",
+            projection=None,
+        )
+    projected_tokens = input_tokens + requested_output_tokens
     threshold_crossed = (
         snapshot.token_limit is not None and projected_tokens > snapshot.token_limit
     )
     triggered = snapshot.mode is not ModelPolicyMode.OBSERVE and (
         snapshot.token_limit is None or threshold_crossed
     )
-    return RuntimeModelPolicyProjection(
+    projection = RuntimeModelPolicyProjection(
         policy_id=snapshot.policy_id,
         provider=snapshot.provider,
         model=snapshot.model,
@@ -195,6 +199,37 @@ def _project_model_policy(
         projected_tokens=projected_tokens,
         token_limit=snapshot.token_limit,
         triggered=triggered,
+    )
+    if triggered and snapshot.mode is ModelPolicyMode.BLOCK:
+        reason = (
+            "Model is blocked by the project policy"
+            if snapshot.token_limit is None
+            else "Projected request exceeds the model token limit"
+        )
+        return ModelPolicyAssessment(
+            decision=RuntimeDecision.BLOCK,
+            mode=RuntimePolicyMode.ENFORCE,
+            reason=reason,
+            projection=projection,
+            blocking_policy_id=snapshot.policy_id,
+        )
+    if triggered and snapshot.mode is ModelPolicyMode.WARN:
+        reason = (
+            "Model requires review by the project policy"
+            if snapshot.token_limit is None
+            else "Projected request exceeds the model warning limit"
+        )
+        return ModelPolicyAssessment(
+            decision=RuntimeDecision.WARN,
+            mode=RuntimePolicyMode.WARN,
+            reason=reason,
+            projection=projection,
+        )
+    return ModelPolicyAssessment(
+        decision=RuntimeDecision.ALLOW,
+        mode=RuntimePolicyMode.OBSERVE,
+        reason="Projected request satisfies the model policy",
+        projection=projection,
     )
 
 
