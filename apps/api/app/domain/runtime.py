@@ -39,7 +39,9 @@ def sanitize_value(value: Any, key: str | None = None) -> Any:
     if isinstance(value, dict):
         return {
             str(item_key): sanitize_value(item_value, str(item_key))
-            for item_key, item_value in sorted(value.items(), key=lambda item: str(item[0]))
+            for item_key, item_value in sorted(
+                value.items(), key=lambda item: str(item[0])
+            )
         }
     if isinstance(value, list):
         return [sanitize_value(item) for item in value[:100]]
@@ -101,8 +103,7 @@ def evaluate_loop(
         if item.result_fingerprint is not None
     ]
     identical_results = (
-        len(known_results) >= threshold
-        and len(set(known_results[-threshold:])) == 1
+        len(known_results) >= threshold and len(set(known_results[-threshold:])) == 1
     )
     sequence = [item.operation_fingerprint for item in recent] + [operation]
     cycle_length, cycle_repetitions = _cycle_evidence(sequence)

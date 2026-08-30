@@ -3,8 +3,8 @@ from uuid import UUID
 
 from control_schemas import (
     RuntimeActionCheckRequest,
-    RuntimeActionCompleteRequest,
     RuntimeActionCompleted,
+    RuntimeActionCompleteRequest,
     RuntimeActionDecision,
     RuntimeCancellationResult,
     RuntimeExecutionCreated,
@@ -109,9 +109,7 @@ async def complete_runtime_action(
     service: RuntimeServiceDependency,
 ) -> RuntimeActionCompleted:
     try:
-        return await service.complete_action(
-            principal, execution_id, action_id, body
-        )
+        return await service.complete_action(principal, execution_id, action_id, body)
     except (
         RuntimeExecutionNotFoundError,
         RuntimeExecutionNotActiveError,

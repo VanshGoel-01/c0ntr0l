@@ -3,13 +3,11 @@ from typing import Any
 
 import httpx
 import pytest
-from control_schemas import RuntimeExecutionRequest
-from control_schemas import RuntimePreflightRequest
-
+from control_schemas import RuntimeExecutionRequest, RuntimePreflightRequest
 from control_sdk import (
     ActionBlockedError,
-    ControlRuntimeClient,
     ControlledExecution,
+    ControlRuntimeClient,
     ModelPreflightBlockedError,
 )
 
@@ -46,9 +44,7 @@ def runtime_handler(
                     "threshold": 3,
                     "reason": "Repeated action produced no progress",
                     "evidence": {"identical_results": True},
-                    "checkpoint_id": (
-                        CHECKPOINT_ID if decision == "block" else None
-                    ),
+                    "checkpoint_id": (CHECKPOINT_ID if decision == "block" else None),
                 },
             )
         if request.url.path.endswith("/preflight"):

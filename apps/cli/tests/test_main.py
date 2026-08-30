@@ -1,6 +1,5 @@
-from typer.testing import CliRunner
-
 import control_cli.main as main_module
+from typer.testing import CliRunner
 
 runner = CliRunner()
 

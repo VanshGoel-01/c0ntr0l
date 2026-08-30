@@ -2,7 +2,6 @@ from uuid import UUID
 
 import httpx
 import pytest
-
 from control_cli.client import ControlApiError, ControlClient
 from control_cli.config import CliConfig
 
