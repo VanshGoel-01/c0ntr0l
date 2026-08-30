@@ -1702,8 +1702,9 @@ components:
           title: Model
         provider:
           type: string
-          maxLength: 64
+          maxLength: 63
           minLength: 1
+          pattern: ^[a-z0-9][a-z0-9_-]{0,62}$
           title: Provider
           default: custom
         application_slug:

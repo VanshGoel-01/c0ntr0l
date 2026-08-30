@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .chat import ChatCompletion
 from .model_policies import ModelPolicyMode
@@ -35,12 +35,22 @@ class RuntimeExecutionRequest(BaseModel):
 
     task: str = Field(min_length=1, max_length=2_000)
     model: str = Field(min_length=1, max_length=128)
-    provider: str = Field(default="custom", min_length=1, max_length=64)
+    provider: str = Field(
+        default="custom",
+        min_length=1,
+        max_length=63,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,62}$",
+    )
     application_slug: str | None = Field(default=None, min_length=1, max_length=63)
     agent_slug: str | None = Field(default=None, min_length=1, max_length=63)
     repeat_threshold: int = Field(default=3, ge=2, le=20)
     window_size: int = Field(default=12, ge=4, le=100)
     policy_mode: RuntimePolicyMode = RuntimePolicyMode.ENFORCE
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def normalize_provider(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 class RuntimeExecutionCreated(BaseModel):

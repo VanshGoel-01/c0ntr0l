@@ -9,6 +9,7 @@ from app.domain.preflight import (
 from control_schemas import (
     ModelPolicyMode,
     RuntimeDecision,
+    RuntimeExecutionRequest,
     RuntimePolicyMode,
     RuntimePreflightRequest,
 )
@@ -154,3 +155,13 @@ def test_warn_mode_reports_policy_trigger_without_blocking() -> None:
 
     assert result.decision is RuntimeDecision.WARN
     assert "model warning limit" in result.reason
+
+
+def test_runtime_provider_is_canonicalized_before_storage_and_policy_lookup() -> None:
+    request = RuntimeExecutionRequest(
+        task="Verify provider policy",
+        provider=" OpenAI ",
+        model="local-model",
+    )
+
+    assert request.provider == "openai"

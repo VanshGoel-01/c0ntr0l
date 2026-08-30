@@ -1362,7 +1362,7 @@ class RuntimeRepository:
                     SELECT id, provider, model, mode, token_limit
                     FROM control.model_policies
                     WHERE project_id = :project_id
-                      AND provider = :provider
+                      AND provider = lower(:provider)
                       AND model = :model
                     """
                     ),
