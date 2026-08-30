@@ -76,3 +76,17 @@ def test_model_policies_are_project_scoped_and_auditable() -> None:
     ).read_text(encoding="utf-8")
     assert "model_policy_id" in decision_schema
     assert "_preflight_model_policy" in runtime_repository
+
+
+def test_chat_policy_blocks_skip_provider_attempts_and_create_checkpoints() -> None:
+    attempt_schema = (
+        ROOT / "migrations" / "postgres" / "120_provider_attempt_policy_skip.sql"
+    ).read_text(encoding="utf-8")
+    execution_repository = (
+        ROOT / "apps" / "api" / "app" / "repositories" / "executions.py"
+    ).read_text(encoding="utf-8")
+
+    assert "'skipped'" in attempt_schema
+    assert "status = 'skipped'" in execution_repository
+    assert "INSERT INTO control.continuity_checkpoints" in execution_repository
+    assert "actual_tokens=0" in execution_repository

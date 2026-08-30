@@ -69,3 +69,9 @@ def test_contract_documents_authentication_and_current_streaming_default() -> No
         ]["operationId"]
         == "checkRuntimeAction"
     )
+    assert (
+        contract["paths"]["/v1/chat/completions"]["post"]["responses"]["403"][
+            "description"
+        ]
+        == "The project model policy blocked the provider call"
+    )

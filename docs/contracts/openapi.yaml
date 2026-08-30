@@ -87,6 +87,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatCompletion'
+        '403':
+          description: The project model policy blocked the provider call
         '422':
           description: Validation Error
           content:

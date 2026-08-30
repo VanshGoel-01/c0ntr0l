@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -5,8 +6,15 @@ from app.domain.auth import ApiKeyPrincipal
 from app.domain.executions import ExecutionTrace
 from app.providers.errors import ProviderUnavailableError
 from app.providers.registry import ProviderRegistry
-from app.services.chat import ChatService
-from control_schemas import ChatCompletion, ChatCompletionChunk, ChatRequest
+from app.services.chat import ChatPolicyBlockedError, ChatService
+from control_schemas import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatRequest,
+    ModelPolicyContext,
+    ModelPolicyMode,
+    RuntimeDecision,
+)
 
 PRINCIPAL = ApiKeyPrincipal(
     api_key_id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -20,6 +28,7 @@ TRACE = ExecutionTrace(
     provider_attempt_id=UUID("00000000-0000-0000-0000-000000000013"),
     provider_name="mock",
 )
+CHECKPOINT_ID = UUID("00000000-0000-0000-0000-000000000014")
 REQUEST = ChatRequest(
     model="mock-gpt",
     messages=[{"role": "user", "content": "private prompt"}],
@@ -45,6 +54,7 @@ class FakeExecutionRepository:
         self.started: tuple[object, ...] | None = None
         self.completed: tuple[object, ...] | None = None
         self.failed: tuple[object, ...] | None = None
+        self.policy_assessment = None
 
     async def start(self, *args: object) -> ExecutionTrace:
         self.started = args
@@ -56,16 +66,23 @@ class FakeExecutionRepository:
     async def fail(self, *args: object, **kwargs: object) -> None:
         self.failed = (*args, kwargs)
 
+    async def record_model_policy(self, trace, model, assessment):  # type: ignore[no-untyped-def]
+        self.policy_assessment = assessment
+        return CHECKPOINT_ID if assessment.decision is RuntimeDecision.BLOCK else None
+
 
 class FakeProvider:
     def __init__(self, error: Exception | None = None) -> None:
         self.error = error
+        self.complete_calls = 0
+        self.stream_calls = 0
 
     async def complete(
         self,
         request: ChatRequest,
         scenario: str | None,
     ) -> ChatCompletion:
+        self.complete_calls += 1
         if self.error is not None:
             raise self.error
         return COMPLETION
@@ -74,10 +91,32 @@ class FakeProvider:
         return ("mock-gpt",)
 
     async def stream(self, request, scenario=None):  # type: ignore[no-untyped-def]
+        self.stream_calls += 1
         if self.error is not None:
             raise self.error
         for chunk in stream_chunks():
             yield chunk
+
+
+class FakeModelPolicyRepository:
+    def __init__(self, mode: ModelPolicyMode, token_limit: int | None = None) -> None:
+        now = datetime.now(UTC)
+        self.context = ModelPolicyContext(
+            id=UUID("00000000-0000-0000-0000-000000000020"),
+            project_id=PRINCIPAL.project_id,
+            provider="mock",
+            model="mock-gpt",
+            mode=mode,
+            token_limit=token_limit,
+            created_at=now,
+            updated_at=now,
+        )
+
+    async def get(self, project_id, provider, model):  # type: ignore[no-untyped-def]
+        assert project_id == PRINCIPAL.project_id
+        assert provider == "mock"
+        assert model == "mock-gpt"
+        return self.context
 
 
 def stream_chunks() -> list[ChatCompletionChunk]:
@@ -130,6 +169,7 @@ async def test_chat_service_records_trace_usage_and_only_fingerprints_content() 
     result = await service.complete(PRINCIPAL, REQUEST, "request-1", None)
 
     assert result.execution_id == str(TRACE.execution_id)
+    assert result.decision is RuntimeDecision.ALLOW
     assert result.completion == COMPLETION
     assert repository.started is not None
     assert repository.completed is not None
@@ -178,6 +218,7 @@ async def test_streaming_relays_chunks_and_reconciles_after_done() -> None:
     assert repository.started[3] is True
     assert repository.completed is not None
     assert repository.failed is None
+    assert result.decision is RuntimeDecision.ALLOW
     assert "private output" not in str(repository.completed[3:])
 
 
@@ -201,3 +242,71 @@ async def test_streaming_provider_failure_is_recorded_before_response() -> None:
 
     assert repository.failed is not None
     assert repository.completed is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_block_policy_prevents_provider_invocation(stream: bool) -> None:
+    repository = FakeExecutionRepository()
+    provider = FakeProvider()
+    service = ChatService(
+        repository,  # type: ignore[arg-type]
+        ProviderRegistry({"mock": provider}),  # type: ignore[arg-type]
+        model_policies=FakeModelPolicyRepository(ModelPolicyMode.BLOCK),  # type: ignore[arg-type]
+    )
+    request = REQUEST.model_copy(update={"stream": stream})
+
+    with pytest.raises(ChatPolicyBlockedError) as raised:
+        if stream:
+            await service.stream(PRINCIPAL, request, None, None)
+        else:
+            await service.complete(PRINCIPAL, request, None, None)
+
+    assert raised.value.execution_id == TRACE.execution_id
+    assert raised.value.checkpoint_id == CHECKPOINT_ID
+    assert provider.complete_calls == 0
+    assert provider.stream_calls == 0
+    assert repository.completed is None
+    assert repository.failed is None
+    assert repository.policy_assessment.decision is RuntimeDecision.BLOCK
+
+
+@pytest.mark.asyncio
+async def test_warn_policy_records_decision_and_allows_provider_call() -> None:
+    repository = FakeExecutionRepository()
+    provider = FakeProvider()
+    service = ChatService(
+        repository,  # type: ignore[arg-type]
+        ProviderRegistry({"mock": provider}),  # type: ignore[arg-type]
+        model_policies=FakeModelPolicyRepository(ModelPolicyMode.WARN),  # type: ignore[arg-type]
+    )
+
+    result = await service.complete(PRINCIPAL, REQUEST, None, None)
+
+    assert result.decision is RuntimeDecision.WARN
+    assert provider.complete_calls == 1
+    assert repository.completed is not None
+    assert repository.policy_assessment.decision is RuntimeDecision.WARN
+
+
+@pytest.mark.asyncio
+async def test_admission_failure_marks_trace_failed_without_calling_provider() -> None:
+    class BrokenModelPolicyRepository:
+        async def get(self, *args):  # type: ignore[no-untyped-def]
+            raise RuntimeError("policy store unavailable")
+
+    repository = FakeExecutionRepository()
+    provider = FakeProvider()
+    service = ChatService(
+        repository,  # type: ignore[arg-type]
+        ProviderRegistry({"mock": provider}),  # type: ignore[arg-type]
+        model_policies=BrokenModelPolicyRepository(),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RuntimeError, match="policy store unavailable"):
+        await service.complete(PRINCIPAL, REQUEST, None, None)
+
+    assert provider.complete_calls == 0
+    assert repository.completed is None
+    assert repository.failed is not None
+    assert "admission_control_error" in str(repository.failed)
