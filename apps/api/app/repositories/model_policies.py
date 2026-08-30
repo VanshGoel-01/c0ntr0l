@@ -32,6 +32,38 @@ class ModelPolicyRepository:
             )
         return [ModelPolicyContext.model_validate(dict(row)) for row in rows]
 
+    async def get(
+        self,
+        project_id: UUID,
+        provider: str,
+        model: str,
+    ) -> ModelPolicyContext | None:
+        async with self._database.connect() as connection:
+            row = (
+                (
+                    await connection.execute(
+                        text(
+                            """
+                        SELECT id, project_id, provider, model, mode, token_limit,
+                               created_at, updated_at
+                        FROM control.model_policies
+                        WHERE project_id = :project_id
+                          AND provider = lower(:provider)
+                          AND model = :model
+                        """
+                        ),
+                        {
+                            "project_id": project_id,
+                            "provider": provider,
+                            "model": model,
+                        },
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+        return ModelPolicyContext.model_validate(dict(row)) if row else None
+
     async def upsert(
         self,
         *,

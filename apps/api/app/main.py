@@ -66,6 +66,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         settings.api_key_pepper.get_secret_value(),
     )
     execution_repository = ExecutionRepository(database)
+    model_policy_repository = ModelPolicyRepository(database)
     runtime_signals = RuntimeSignals(settings.redis_url)
     execution_events = ExecutionEvents(
         settings.redis_url,
@@ -73,12 +74,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         block_milliseconds=settings.event_stream_block_milliseconds,
     )
     chat_service = ChatService(
-        execution_repository, provider_registry, execution_events
+        execution_repository,
+        provider_registry,
+        execution_events,
+        model_policy_repository,
     )
     execution_query_service = ExecutionQueryService(execution_repository)
     workspace_service = WorkspaceService(WorkspaceRepository(database))
     incident_service = IncidentService(IncidentRepository(database), execution_events)
-    model_policy_service = ModelPolicyService(ModelPolicyRepository(database))
+    model_policy_service = ModelPolicyService(model_policy_repository)
     recovery_runner = RecoveryRunner(
         RecoveryRepository(database),
         provider_registry,
