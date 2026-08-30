@@ -35,6 +35,9 @@ EXPECTED_RELATIONS = (
     "control.policy_decisions",
     "control.incidents",
     "control.provider_handoffs",
+    "control.continuity_checkpoints",
+    "control.recovery_attempts",
+    "control.model_policies",
     "audit.events",
 )
 
