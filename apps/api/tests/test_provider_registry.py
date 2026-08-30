@@ -21,8 +21,10 @@ class CatalogProvider:
         self.models = models
         self.error = error
         self.delay = delay
+        self.calls = 0
 
     async def list_models(self) -> tuple[str, ...]:
+        self.calls += 1
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.error is not None:
@@ -118,3 +120,17 @@ async def test_catalog_timeout_bounds_slow_provider_discovery() -> None:
     catalog = await registry.catalog()
 
     assert catalog.providers[0].status is ProviderAvailability.UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_concurrent_cold_catalog_requests_share_one_refresh() -> None:
+    provider = CatalogProvider(("model",), delay=0.02)
+    registry = ProviderRegistry(  # type: ignore[arg-type]
+        {"local": provider},
+        catalog_ttl_seconds=30,
+    )
+
+    selections = await asyncio.gather(*(registry.select("model") for _ in range(10)))
+
+    assert {selection.name for selection in selections} == {"local"}
+    assert provider.calls == 1

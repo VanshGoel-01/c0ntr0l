@@ -67,6 +67,8 @@ class ProviderRegistry:
         self._catalog_timeout_seconds = catalog_timeout_seconds
         self._catalog_ttl_seconds = catalog_ttl_seconds
         self._model_cache: dict[str, tuple[float, tuple[str, ...]]] = {}
+        self._refresh_lock = asyncio.Lock()
+        self._model_refreshes: dict[str, asyncio.Task[tuple[str, ...]]] = {}
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -142,16 +144,40 @@ class ProviderRegistry:
         cached = self._model_cache.get(name)
         if cached is not None and cached[0] > now:
             return cached[1]
+        async with self._refresh_lock:
+            cached = self._model_cache.get(name)
+            if cached is not None and cached[0] > time.monotonic():
+                return cached[1]
+            refresh = self._model_refreshes.get(name)
+            if refresh is None:
+                refresh = asyncio.create_task(self._refresh_models(name))
+                self._model_refreshes[name] = refresh
+                refresh.add_done_callback(
+                    lambda completed, provider_name=name: self._clear_refresh(
+                        provider_name, completed
+                    )
+                )
+        return await asyncio.shield(refresh)
+
+    async def _refresh_models(self, name: str) -> tuple[str, ...]:
         try:
             async with asyncio.timeout(self._catalog_timeout_seconds):
                 models = await self._providers[name].list_models()
         except TimeoutError as exc:
             raise ProviderUnavailableError from exc
         self._model_cache[name] = (
-            now + self._catalog_ttl_seconds,
+            time.monotonic() + self._catalog_ttl_seconds,
             models,
         )
         return models
+
+    def _clear_refresh(
+        self,
+        name: str,
+        task: asyncio.Task[tuple[str, ...]],
+    ) -> None:
+        if self._model_refreshes.get(name) is task:
+            self._model_refreshes.pop(name, None)
 
     async def complete(
         self,
