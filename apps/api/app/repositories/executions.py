@@ -157,7 +157,7 @@ class ExecutionRepository:
             provider_span_id = await self._insert_span(
                 connection,
                 execution_id=execution_id,
-                sequence_no=2,
+                sequence_no=3,
                 kind="provider",
                 name=f"{provider_name}.chat.completion",
                 parent_span_id=root_span_id,
@@ -354,7 +354,7 @@ class ExecutionRepository:
             policy_span_id = await self._insert_span(
                 connection,
                 execution_id=trace.execution_id,
-                sequence_no=3,
+                sequence_no=2,
                 kind="policy",
                 name="Chat model policy admission",
                 parent_span_id=trace.root_span_id,
