@@ -121,6 +121,12 @@ export type RuntimeCancellationResult = { executionId: string; status: string; c
 export type ModelTarget = { provider: string; model: string };
 export type DependencyHealth = { status: string; detail: string | null };
 export type Health = { status: string; service: string; version: string; dependencies: Record<string, DependencyHealth> };
+export type Provider = {
+  name: string;
+  status: "operational" | "unavailable";
+  models: string[];
+};
+export type ProviderCatalog = { checkedAt: string; providers: Provider[] };
 
 export type ApplicationContext = { id: string; slug: string; name: string; environment: string; status: string };
 export type BudgetPolicy = {

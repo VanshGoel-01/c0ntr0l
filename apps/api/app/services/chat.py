@@ -10,20 +10,26 @@ from control_schemas import ChatCompletion, ChatRequest, ControlEventType
 from app.domain.auth import ApiKeyPrincipal
 from app.domain.streaming import ChatStreamAccumulator
 from app.infrastructure.execution_events import ExecutionEvents
-from app.providers.errors import ProviderError, ProviderResponseError
-from app.providers.http import HttpProviderClient
+from app.providers.errors import (
+    ProviderError,
+    ProviderResponseError,
+    ProviderScenarioUnsupportedError,
+)
+from app.providers.registry import ProviderRegistry, ProviderSelection
 from app.repositories.executions import ExecutionRepository
 
 
 @dataclass(frozen=True, slots=True)
 class ChatResult:
     execution_id: str
+    provider_name: str
     completion: ChatCompletion
 
 
 @dataclass(frozen=True, slots=True)
 class ChatStreamResult:
     execution_id: str
+    provider_name: str
     events: AsyncIterator[str]
 
 
@@ -31,11 +37,11 @@ class ChatService:
     def __init__(
         self,
         repository: ExecutionRepository,
-        provider: HttpProviderClient,
+        providers: ProviderRegistry,
         events: ExecutionEvents | None = None,
     ) -> None:
         self._repository = repository
-        self._provider = provider
+        self._providers = providers
         self._events = events
 
     async def complete(
@@ -44,14 +50,19 @@ class ChatService:
         request: ChatRequest,
         request_id: str | None,
         demo_scenario: str | None,
+        requested_provider: str | None = None,
         application_slug: str | None = None,
         agent_slug: str | None = None,
     ) -> ChatResult:
+        selection = await self._select_provider(
+            request.model, requested_provider, demo_scenario
+        )
         resolved_request_id = request_id or f"req_{uuid4().hex}"
         input_fingerprint = self._fingerprint(request.model_dump_json())
         trace = await self._repository.start(
             principal,
             request.model,
+            selection.name,
             request.stream,
             resolved_request_id,
             input_fingerprint,
@@ -63,7 +74,7 @@ class ChatService:
         )
         started_at = time.perf_counter()
         try:
-            completion = await self._provider.complete(request, demo_scenario)
+            completion = await selection.provider.complete(request, demo_scenario)
         except ProviderError as exc:
             latency_ms = self._elapsed_ms(started_at)
             await self._repository.fail(
@@ -89,6 +100,7 @@ class ChatService:
         )
         return ChatResult(
             execution_id=str(trace.execution_id),
+            provider_name=selection.name,
             completion=completion,
         )
 
@@ -98,21 +110,26 @@ class ChatService:
         request: ChatRequest,
         request_id: str | None,
         demo_scenario: str | None,
+        requested_provider: str | None = None,
         application_slug: str | None = None,
         agent_slug: str | None = None,
     ) -> ChatStreamResult:
+        selection = await self._select_provider(
+            request.model, requested_provider, demo_scenario
+        )
         resolved_request_id = request_id or f"req_{uuid4().hex}"
         input_fingerprint = self._fingerprint(request.model_dump_json())
         trace = await self._repository.start(
             principal,
             request.model,
+            selection.name,
             True,
             resolved_request_id,
             input_fingerprint,
             application_slug,
             agent_slug,
         )
-        provider_stream = self._provider.stream(request, demo_scenario).__aiter__()
+        provider_stream = selection.provider.stream(request, demo_scenario).__aiter__()
         await self._publish(
             principal, ControlEventType.EXECUTION_STARTED, trace.execution_id
         )
@@ -193,8 +210,20 @@ class ChatService:
 
         return ChatStreamResult(
             execution_id=str(trace.execution_id),
+            provider_name=selection.name,
             events=relay(),
         )
+
+    async def _select_provider(
+        self,
+        model: str,
+        requested_provider: str | None,
+        demo_scenario: str | None,
+    ) -> ProviderSelection:
+        selection = await self._providers.select(model, requested_provider)
+        if demo_scenario is not None and selection.name != "mock":
+            raise ProviderScenarioUnsupportedError
+        return selection
 
     @staticmethod
     def _fingerprint(value: str) -> str:

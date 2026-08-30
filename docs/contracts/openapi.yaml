@@ -65,6 +65,15 @@ paths:
             maxLength: 63
           - type: 'null'
           title: X-Control-Agent
+      - name: X-Control-Provider
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            pattern: ^(?:auto|[a-z0-9][a-z0-9_-]{0,62})$
+          - type: 'null'
+          title: X-Control-Provider
       requestBody:
         required: true
         content:
@@ -255,6 +264,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/providers:
+    get:
+      tags:
+      - providers
+      summary: List Providers
+      operationId: listProviders
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderCatalog'
+      security:
+      - bearerAuth: []
   /api/v1/workspace:
     get:
       tags:
@@ -1188,6 +1212,48 @@ components:
       - assistant
       - tool
       title: MessageRole
+    ProviderAvailability:
+      type: string
+      enum:
+      - operational
+      - unavailable
+      title: ProviderAvailability
+    ProviderCatalog:
+      properties:
+        checked_at:
+          type: string
+          format: date-time
+          title: Checked At
+        providers:
+          items:
+            $ref: '#/components/schemas/ProviderSummary'
+          type: array
+          title: Providers
+      type: object
+      required:
+      - checked_at
+      - providers
+      title: ProviderCatalog
+    ProviderSummary:
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9_-]{0,62}$
+          title: Name
+        status:
+          $ref: '#/components/schemas/ProviderAvailability'
+        models:
+          items:
+            type: string
+          type: array
+          maxItems: 1000
+          title: Models
+      type: object
+      required:
+      - name
+      - status
+      - models
+      title: ProviderSummary
     RecoveryStrategy:
       type: string
       enum:

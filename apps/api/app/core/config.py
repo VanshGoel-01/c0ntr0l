@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: float = Field(default=60.0, ge=1, le=300)
     provider_timeout_seconds: float = Field(default=10.0, ge=0.1, le=120.0)
+    provider_catalog_timeout_seconds: float = Field(default=2.0, ge=0.1, le=10.0)
+    provider_catalog_ttl_seconds: float = Field(default=5.0, ge=0, le=300.0)
     recovery_max_tokens: int = Field(default=128, ge=32, le=4096)
     default_context_window_tokens: int = Field(default=8_192, ge=512)
     mock_context_window_tokens: int = Field(default=8_192, ge=512)

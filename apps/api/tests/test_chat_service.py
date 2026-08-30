@@ -4,6 +4,7 @@ import pytest
 from app.domain.auth import ApiKeyPrincipal
 from app.domain.executions import ExecutionTrace
 from app.providers.errors import ProviderUnavailableError
+from app.providers.registry import ProviderRegistry
 from app.services.chat import ChatService
 from control_schemas import ChatCompletion, ChatCompletionChunk, ChatRequest
 
@@ -17,6 +18,7 @@ TRACE = ExecutionTrace(
     root_span_id=UUID("00000000-0000-0000-0000-000000000011"),
     provider_span_id=UUID("00000000-0000-0000-0000-000000000012"),
     provider_attempt_id=UUID("00000000-0000-0000-0000-000000000013"),
+    provider_name="mock",
 )
 REQUEST = ChatRequest(
     model="mock-gpt",
@@ -68,6 +70,9 @@ class FakeProvider:
             raise self.error
         return COMPLETION
 
+    async def list_models(self) -> tuple[str, ...]:
+        return ("mock-gpt",)
+
     async def stream(self, request, scenario=None):  # type: ignore[no-untyped-def]
         if self.error is not None:
             raise self.error
@@ -117,7 +122,10 @@ def stream_chunks() -> list[ChatCompletionChunk]:
 @pytest.mark.asyncio
 async def test_chat_service_records_trace_usage_and_only_fingerprints_content() -> None:
     repository = FakeExecutionRepository()
-    service = ChatService(repository, FakeProvider())  # type: ignore[arg-type]
+    service = ChatService(
+        repository,
+        ProviderRegistry({"mock": FakeProvider()}),  # type: ignore[arg-type]
+    )
 
     result = await service.complete(PRINCIPAL, REQUEST, "request-1", None)
 
@@ -125,7 +133,8 @@ async def test_chat_service_records_trace_usage_and_only_fingerprints_content() 
     assert result.completion == COMPLETION
     assert repository.started is not None
     assert repository.completed is not None
-    input_fingerprint = repository.started[4]
+    assert repository.started[2] == "mock"
+    input_fingerprint = repository.started[5]
     output_fingerprint = repository.completed[3]
     assert len(str(input_fingerprint)) == 64
     assert len(str(output_fingerprint)) == 64
@@ -138,7 +147,9 @@ async def test_provider_failure_is_written_to_the_execution_trace() -> None:
     repository = FakeExecutionRepository()
     service = ChatService(  # type: ignore[arg-type]
         repository,
-        FakeProvider(ProviderUnavailableError()),
+        ProviderRegistry(
+            {"mock": FakeProvider(ProviderUnavailableError())}  # type: ignore[arg-type]
+        ),
     )
 
     with pytest.raises(ProviderUnavailableError):
@@ -152,7 +163,10 @@ async def test_provider_failure_is_written_to_the_execution_trace() -> None:
 @pytest.mark.asyncio
 async def test_streaming_relays_chunks_and_reconciles_after_done() -> None:
     repository = FakeExecutionRepository()
-    service = ChatService(repository, FakeProvider())  # type: ignore[arg-type]
+    service = ChatService(
+        repository,
+        ProviderRegistry({"mock": FakeProvider()}),  # type: ignore[arg-type]
+    )
     streaming_request = REQUEST.model_copy(update={"stream": True})
 
     result = await service.stream(PRINCIPAL, streaming_request, None, None)
@@ -161,7 +175,7 @@ async def test_streaming_relays_chunks_and_reconciles_after_done() -> None:
     assert result.execution_id == str(TRACE.execution_id)
     assert events[-1] == "data: [DONE]\n\n"
     assert repository.started is not None
-    assert repository.started[2] is True
+    assert repository.started[3] is True
     assert repository.completed is not None
     assert repository.failed is None
     assert "private output" not in str(repository.completed[3:])
@@ -172,7 +186,9 @@ async def test_streaming_provider_failure_is_recorded_before_response() -> None:
     repository = FakeExecutionRepository()
     service = ChatService(  # type: ignore[arg-type]
         repository,
-        FakeProvider(ProviderUnavailableError()),
+        ProviderRegistry(
+            {"mock": FakeProvider(ProviderUnavailableError())}  # type: ignore[arg-type]
+        ),
     )
 
     with pytest.raises(ProviderUnavailableError):

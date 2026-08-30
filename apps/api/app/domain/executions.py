@@ -8,3 +8,4 @@ class ExecutionTrace:
     root_span_id: UUID
     provider_span_id: UUID
     provider_attempt_id: UUID
+    provider_name: str

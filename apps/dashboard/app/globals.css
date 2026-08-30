@@ -386,6 +386,7 @@ html[data-theme="dark"] .provider-logo.indigo { background: rgba(98,91,210,.22);
 html[data-theme="dark"] .provider-logo.magenta { background: rgba(181,46,91,.16); color: #e77ca0; }
 .provider-cards h3 { font-size: 14px; margin: 0 0 5px; }
 .provider-cards > article > strong { font-size: 12px; font-weight: 600; grid-column: 1 / -1; }
+.provider-models { color: var(--muted); font-family: var(--font-mono); font-size: 10px; grid-column: 1 / -1; line-height: 1.5; overflow-wrap: anywhere; }
 .provider-cards progress { grid-column: 1 / -1; }
 .provider-health { align-items: center; color: var(--muted); display: inline-flex; font-size: 11px; font-weight: 700; gap: 6px; text-transform: capitalize; }
 .provider-health i { background: currentColor; border-radius: 50%; height: 6px; width: 6px; }
