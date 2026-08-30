@@ -87,11 +87,9 @@ export function InterventionWorkbench({ intervention, modelPolicies, modelTarget
   const [result, setResult] = useState<RuntimeRecoveryResult | null>(null);
   const [feedback, setFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const sourcePolicy = checkpoint ? modelPolicies[`${checkpoint.packet.sourceProvider}/${checkpoint.packet.sourceModel}`] : undefined;
-  const preflightModelPolicy = asRecord(intervention.evidence.model_policy);
   const sourcePolicyBlocked = sourcePolicy?.mode === "block" && (
     sourcePolicy.tokenLimit === null
     || intervention.policyCode === "chat_model_policy"
-    || (intervention.policyCode === "model_preflight" && preflightModelPolicy.triggered === true)
   );
   const availableTargets = useMemo(() => modelTargets.filter((target) => {
     if (target.model === checkpoint?.packet.sourceModel && target.provider === checkpoint?.packet.sourceProvider) return false;
