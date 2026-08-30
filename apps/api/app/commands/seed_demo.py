@@ -53,6 +53,65 @@ async def seed_demo() -> tuple[UUID, str]:
                     ).scalar_one()
                 )
             )
+            application_id = UUID(
+                str(
+                    (
+                        await connection.execute(
+                            text(
+                                """
+                                INSERT INTO control.applications (
+                                    project_id, slug, name, environment
+                                ) VALUES (
+                                    :project_id, 'research-agent', 'Research Agent',
+                                    'development'
+                                )
+                                ON CONFLICT (project_id, slug) DO UPDATE SET
+                                    name = EXCLUDED.name,
+                                    environment = EXCLUDED.environment,
+                                    status = 'active',
+                                    updated_at = now()
+                                RETURNING id
+                                """
+                            ),
+                            {"project_id": project_id},
+                        )
+                    ).scalar_one()
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO control.agents (application_id, slug, name, agent_type)
+                    VALUES (:application_id, 'runtime-assistant', 'Runtime Assistant', 'assistant')
+                    ON CONFLICT (application_id, slug) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        status = 'active',
+                        updated_at = now()
+                    """
+                ),
+                {"application_id": application_id},
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO control.budget_policies (
+                        scope_type, scope_id, name, period_type, mode,
+                        max_requests, max_tokens, currency
+                    ) VALUES (
+                        'project', :project_id, 'Review daily limit', 'daily',
+                        'warn', 500, 250000, 'USD'
+                    )
+                    ON CONFLICT (scope_type, scope_id, name) DO UPDATE SET
+                        mode = EXCLUDED.mode,
+                        max_requests = EXCLUDED.max_requests,
+                        max_tokens = EXCLUDED.max_tokens,
+                        max_cost = NULL,
+                        is_enabled = true,
+                        updated_at = now()
+                    """
+                ),
+                {"project_id": project_id},
+            )
             await connection.execute(
                 text(
                     """

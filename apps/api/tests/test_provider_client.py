@@ -88,3 +88,33 @@ async def test_provider_gateway_timeout_is_classified_as_timeout() -> None:
             await client.complete(REQUEST)
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_provider_stream_validates_and_returns_typed_chunks() -> None:
+    event = {
+        "id": "chatcmpl-stream",
+        "object": "chat.completion.chunk",
+        "created": 1,
+        "model": "mock-gpt",
+        "choices": [
+            {"index": 0, "delta": {"content": "done"}, "finish_reason": "stop"}
+        ],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+    }
+
+    def handler(request: Request) -> Response:
+        payload = json.loads(request.content)
+        assert payload["stream"] is True
+        assert payload["stream_options"] == {"include_usage": True}
+        body = f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n"
+        return Response(200, text=body, headers={"content-type": "text/event-stream"})
+
+    client = HttpProviderClient("http://provider.test", 1, MockTransport(handler))
+    try:
+        chunks = [chunk async for chunk in client.stream(REQUEST)]
+    finally:
+        await client.close()
+
+    assert len(chunks) == 1
+    assert chunks[0].usage.total_tokens == 4

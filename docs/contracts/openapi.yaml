@@ -2,383 +2,2007 @@ openapi: 3.1.0
 info:
   title: c0ntr0l API
   version: 0.1.0
-  description: Runtime safety and observability gateway for AI applications.
-servers:
-  - url: http://localhost:8000
 paths:
   /health:
     get:
+      tags:
+      - health
+      summary: Get Health
       operationId: getHealth
-      tags: [health]
       responses:
-        "200":
-          description: Gateway and dependency health.
+        '200':
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthResponse"
+                $ref: '#/components/schemas/HealthResponse'
   /v1/chat/completions:
     post:
+      tags:
+      - chat
+      summary: Create Chat Completion
       operationId: createChatCompletion
-      tags: [chat]
       security:
-        - bearerAuth: []
+      - bearerAuth: []
       parameters:
-        - in: header
-          name: X-Request-Id
-          required: false
-          schema:
-            type: string
+      - name: X-Request-Id
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
             minLength: 1
             maxLength: 128
-        - in: header
-          name: X-Control-Demo-Scenario
-          required: false
-          description: Development-only deterministic provider scenario.
-          schema:
-            type: string
-            enum: [normal, timeout, provider_error, repeated_tool]
+          - type: 'null'
+          title: X-Request-Id
+      - name: X-Control-Demo-Scenario
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            minLength: 1
+            maxLength: 32
+          - type: 'null'
+          title: X-Control-Demo-Scenario
+      - name: X-Control-Application
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            minLength: 1
+            maxLength: 63
+          - type: 'null'
+          title: X-Control-Application
+      - name: X-Control-Agent
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            minLength: 1
+            maxLength: 63
+          - type: 'null'
+          title: X-Control-Agent
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ChatRequest"
+              $ref: '#/components/schemas/ChatRequest'
       responses:
-        "200":
-          description: Completed provider response with a durable execution identity.
-          headers:
-            X-Control-Execution-Id:
-              required: true
-              schema:
-                type: string
-                format: uuid
+        '200':
+          description: Successful Response
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChatCompletion"
-        "401":
-          description: Missing, inactive, expired, or invalid project API key.
-        "501":
-          description: Streaming requested before durable reconciliation is implemented.
-        "502":
-          description: Provider unavailable or invalid provider response.
-        "504":
-          description: Provider timeout.
+                $ref: '#/components/schemas/ChatCompletion'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/events:
+    get:
+      tags:
+      - events
+      summary: Stream Control Events
+      operationId: streamControlEvents
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: Last-Event-ID
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+            pattern: ^\d+-\d+$
+          - type: 'null'
+          title: Last-Event-Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/executions:
     get:
+      tags:
+      - executions
+      summary: List Executions
       operationId: listExecutions
-      tags: [executions]
       security:
-        - bearerAuth: []
+      - bearerAuth: []
       parameters:
-        - in: query
-          name: limit
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 20
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 20
+          title: Limit
       responses:
-        "200":
-          description: Recent executions belonging to the authenticated project.
+        '200':
+          description: Successful Response
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/ExecutionSummary"
-        "401":
-          description: Invalid project API key.
-  /api/v1/executions/{execution_id}:
-    get:
-      operationId: getExecution
-      tags: [executions]
-      security:
-        - bearerAuth: []
-      parameters:
-        - in: path
-          name: execution_id
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Project-scoped execution with spans and normalized usage.
+                  $ref: '#/components/schemas/ExecutionSummary'
+                title: Response Listexecutions
+        '422':
+          description: Validation Error
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ExecutionDetail"
-        "401":
-          description: Invalid project API key.
-        "404":
-          description: Execution does not exist in the authenticated project.
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/executions/{execution_id}:
+    get:
+      tags:
+      - executions
+      summary: Get Execution
+      operationId: getExecution
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Execution Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionDetail'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/incidents:
+    get:
+      tags:
+      - incidents
+      summary: List Incidents
+      operationId: listIncidents
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/IncidentStatus'
+          - type: 'null'
+          title: Status
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IncidentContext'
+                title: Response Listincidents
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/incidents/{incident_id}:
+    patch:
+      tags:
+      - incidents
+      summary: Update Incident Status
+      operationId: updateIncidentStatus
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: incident_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Incident Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentStatusUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentContext'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/workspace:
+    get:
+      tags:
+      - workspace
+      summary: Get Workspace
+      operationId: getWorkspace
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceContext'
+      security:
+      - bearerAuth: []
+  /api/v1/runtime/executions:
+    post:
+      tags:
+      - runtime
+      summary: Start Runtime Execution
+      operationId: startRuntimeExecution
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeExecutionRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeExecutionCreated'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - bearerAuth: []
+  /api/v1/runtime/executions/{execution_id}/preflight:
+    post:
+      tags:
+      - runtime
+      summary: Preflight Runtime Model Call
+      operationId: preflightRuntimeModelCall
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Execution Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimePreflightRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimePreflightResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/executions/{execution_id}/actions/check:
+    post:
+      tags:
+      - runtime
+      summary: Check Runtime Action
+      operationId: checkRuntimeAction
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Execution Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeActionCheckRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeActionDecision'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/executions/{execution_id}/actions/{action_id}/complete:
+    post:
+      tags:
+      - runtime
+      summary: Complete Runtime Action
+      operationId: completeRuntimeAction
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Execution Id
+      - name: action_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Action Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeActionCompleteRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeActionCompleted'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/executions/{execution_id}/intervention:
+    get:
+      tags:
+      - runtime
+      summary: Get Runtime Intervention
+      operationId: getRuntimeIntervention
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Execution Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeIntervention'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/executions/{execution_id}/cancel:
+    post:
+      tags:
+      - runtime
+      summary: Cancel Runtime Execution
+      operationId: cancelRuntimeExecution
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Execution Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeCancellationResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/runtime/executions/{execution_id}/recover:
+    post:
+      tags:
+      - runtime
+      summary: Recover Runtime Execution
+      operationId: recoverRuntimeExecution
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Execution Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeRecoveryRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeRecoveryResult'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
+  schemas:
+    ApplicationContext:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        slug:
+          type: string
+          title: Slug
+        name:
+          type: string
+          title: Name
+        environment:
+          type: string
+          title: Environment
+        status:
+          type: string
+          title: Status
+      type: object
+      required:
+      - id
+      - slug
+      - name
+      - environment
+      - status
+      title: ApplicationContext
+    BudgetPolicyContext:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        scope_type:
+          type: string
+          title: Scope Type
+        scope_id:
+          type: string
+          format: uuid
+          title: Scope Id
+        period_type:
+          type: string
+          title: Period Type
+        mode:
+          type: string
+          title: Mode
+        max_requests:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Requests
+        max_tokens:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Tokens
+        max_cost:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Max Cost
+        currency:
+          type: string
+          title: Currency
+        is_enabled:
+          type: boolean
+          title: Is Enabled
+      type: object
+      required:
+      - id
+      - name
+      - scope_type
+      - scope_id
+      - period_type
+      - mode
+      - max_requests
+      - max_tokens
+      - max_cost
+      - currency
+      - is_enabled
+      title: BudgetPolicyContext
+    ChatChoice:
+      properties:
+        index:
+          type: integer
+          title: Index
+          default: 0
+        message:
+          $ref: '#/components/schemas/ResponseMessage'
+        finish_reason:
+          type: string
+          title: Finish Reason
+      type: object
+      required:
+      - message
+      - finish_reason
+      title: ChatChoice
+    ChatCompletion:
+      properties:
+        id:
+          type: string
+          title: Id
+        object:
+          type: string
+          title: Object
+          default: chat.completion
+        created:
+          type: integer
+          title: Created
+        model:
+          type: string
+          title: Model
+        choices:
+          items:
+            $ref: '#/components/schemas/ChatChoice'
+          type: array
+          minItems: 1
+          title: Choices
+        usage:
+          $ref: '#/components/schemas/Usage'
+      type: object
+      required:
+      - id
+      - created
+      - model
+      - choices
+      - usage
+      title: ChatCompletion
+    ChatMessage:
+      properties:
+        role:
+          $ref: '#/components/schemas/MessageRole'
+        content:
+          type: string
+          maxLength: 32768
+          minLength: 1
+          title: Content
+        name:
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+          - type: 'null'
+          title: Name
+      type: object
+      required:
+      - role
+      - content
+      title: ChatMessage
+    ChatRequest:
+      properties:
+        model:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Model
+        messages:
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+          type: array
+          maxItems: 100
+          minItems: 1
+          title: Messages
+        stream:
+          type: boolean
+          title: Stream
+          default: false
+        stream_options:
+          anyOf:
+          - $ref: '#/components/schemas/StreamOptions'
+          - type: 'null'
+        max_tokens:
+          type: integer
+          maximum: 4096.0
+          minimum: 1.0
+          title: Max Tokens
+          default: 256
+        temperature:
+          anyOf:
+          - type: number
+            maximum: 2.0
+            minimum: 0.0
+          - type: 'null'
+          title: Temperature
+      type: object
+      required:
+      - model
+      - messages
+      title: ChatRequest
+    ContinuityPacket:
+      properties:
+        version:
+          type: string
+          title: Version
+          default: '1.0'
+        task:
+          type: string
+          title: Task
+        source_execution_id:
+          type: string
+          format: uuid
+          title: Source Execution Id
+        source_provider:
+          type: string
+          title: Source Provider
+          default: custom
+        source_model:
+          type: string
+          title: Source Model
+        completed_work:
+          items:
+            type: string
+          type: array
+          title: Completed Work
+        failed_operation:
+          additionalProperties: true
+          type: object
+          title: Failed Operation
+        reason_for_intervention:
+          type: string
+          title: Reason For Intervention
+        recommended_action:
+          type: string
+          title: Recommended Action
+        evidence:
+          additionalProperties: true
+          type: object
+          title: Evidence
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - task
+      - source_execution_id
+      - source_model
+      - reason_for_intervention
+      - recommended_action
+      - created_at
+      title: ContinuityPacket
+    DependencyHealth:
+      properties:
+        status:
+          $ref: '#/components/schemas/DependencyStatus'
+        detail:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Detail
+      type: object
+      required:
+      - status
+      title: DependencyHealth
+    DependencyStatus:
+      type: string
+      enum:
+      - healthy
+      - unhealthy
+      title: DependencyStatus
+    ExecutionDetail:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+        project_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Project Id
+        project_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Name
+        application_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Application Id
+        application_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Application Name
+        agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Id
+        agent_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Name
+        status:
+          type: string
+          title: Status
+        requested_model:
+          type: string
+          title: Requested Model
+        active_provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Provider
+        active_model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Model
+        is_streaming:
+          type: boolean
+          title: Is Streaming
+        input_fingerprint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Input Fingerprint
+        output_fingerprint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Output Fingerprint
+        final_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Final Reason
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        span_count:
+          type: integer
+          minimum: 0.0
+          title: Span Count
+        total_tokens:
+          type: integer
+          minimum: 0.0
+          title: Total Tokens
+        total_cost:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Total Cost
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+        spans:
+          items:
+            $ref: '#/components/schemas/SpanSummary'
+          type: array
+          title: Spans
+        usage:
+          items:
+            $ref: '#/components/schemas/UsageSummary'
+          type: array
+          title: Usage
+      type: object
+      required:
+      - id
+      - status
+      - requested_model
+      - active_provider
+      - active_model
+      - is_streaming
+      - input_fingerprint
+      - output_fingerprint
+      - final_reason
+      - error_code
+      - started_at
+      - completed_at
+      - duration_ms
+      - span_count
+      - total_tokens
+      - total_cost
+      - spans
+      - usage
+      title: ExecutionDetail
+    ExecutionSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        request_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Request Id
+        project_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Project Id
+        project_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Project Name
+        application_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Application Id
+        application_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Application Name
+        agent_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Agent Id
+        agent_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Agent Name
+        status:
+          type: string
+          title: Status
+        requested_model:
+          type: string
+          title: Requested Model
+        active_provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Provider
+        active_model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Active Model
+        is_streaming:
+          type: boolean
+          title: Is Streaming
+        input_fingerprint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Input Fingerprint
+        output_fingerprint:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Output Fingerprint
+        final_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Final Reason
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        span_count:
+          type: integer
+          minimum: 0.0
+          title: Span Count
+        total_tokens:
+          type: integer
+          minimum: 0.0
+          title: Total Tokens
+        total_cost:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Total Cost
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+      type: object
+      required:
+      - id
+      - status
+      - requested_model
+      - active_provider
+      - active_model
+      - is_streaming
+      - input_fingerprint
+      - output_fingerprint
+      - final_reason
+      - error_code
+      - started_at
+      - completed_at
+      - duration_ms
+      - span_count
+      - total_tokens
+      - total_cost
+      title: ExecutionSummary
+    FunctionCall:
+      properties:
+        name:
+          type: string
+          title: Name
+        arguments:
+          type: string
+          title: Arguments
+      type: object
+      required:
+      - name
+      - arguments
+      title: FunctionCall
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HealthResponse:
+      properties:
+        status:
+          $ref: '#/components/schemas/HealthStatus'
+        service:
+          type: string
+          title: Service
+          default: c0ntr0l-api
+        version:
+          type: string
+          title: Version
+        dependencies:
+          additionalProperties:
+            $ref: '#/components/schemas/DependencyHealth'
+          type: object
+          title: Dependencies
+      type: object
+      required:
+      - status
+      - version
+      title: HealthResponse
+    HealthStatus:
+      type: string
+      enum:
+      - ok
+      - degraded
+      title: HealthStatus
+    IncidentContext:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        trace_id:
+          type: string
+          title: Trace Id
+        application_name:
+          type: string
+          title: Application Name
+        provider:
+          type: string
+          title: Provider
+        model:
+          type: string
+          title: Model
+        incident_type:
+          type: string
+          title: Incident Type
+        severity:
+          type: string
+          title: Severity
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        title:
+          type: string
+          title: Title
+        evidence:
+          additionalProperties: true
+          type: object
+          title: Evidence
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        acknowledged_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Acknowledged At
+        resolved_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Resolved At
+      type: object
+      required:
+      - id
+      - execution_id
+      - trace_id
+      - application_name
+      - provider
+      - model
+      - incident_type
+      - severity
+      - status
+      - title
+      - evidence
+      - created_at
+      - acknowledged_at
+      - resolved_at
+      title: IncidentContext
+    IncidentStatus:
+      type: string
+      enum:
+      - open
+      - acknowledged
+      - resolved
+      title: IncidentStatus
+    IncidentStatusUpdate:
+      properties:
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+      additionalProperties: false
+      type: object
+      required:
+      - status
+      title: IncidentStatusUpdate
+    MessageRole:
+      type: string
+      enum:
+      - system
+      - user
+      - assistant
+      - tool
+      title: MessageRole
+    RecoveryStrategy:
+      type: string
+      enum:
+      - retry_modified
+      - model_handoff
+      - manual_resume
+      - stop
+      title: RecoveryStrategy
+    ResponseMessage:
+      properties:
+        role:
+          $ref: '#/components/schemas/MessageRole'
+          default: assistant
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content
+        tool_calls:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ToolCall'
+            type: array
+          - type: 'null'
+          title: Tool Calls
+      type: object
+      required:
+      - content
+      title: ResponseMessage
+    RuntimeActionCheckRequest:
+      properties:
+        kind:
+          type: string
+          pattern: ^(tool|model)$
+          title: Kind
+          default: tool
+        name:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Name
+        arguments:
+          additionalProperties: true
+          type: object
+          title: Arguments
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: RuntimeActionCheckRequest
+    RuntimeActionCompleteRequest:
+      properties:
+        status:
+          type: string
+          pattern: ^(completed|failed)$
+          title: Status
+          default: completed
+        result:
+          title: Result
+        progress:
+          type: boolean
+          title: Progress
+        summary:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Summary
+      additionalProperties: false
+      type: object
+      required:
+      - progress
+      title: RuntimeActionCompleteRequest
+    RuntimeActionCompleted:
+      properties:
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        action_id:
+          type: string
+          format: uuid
+          title: Action Id
+        status:
+          type: string
+          title: Status
+        result_fingerprint:
+          type: string
+          title: Result Fingerprint
+        progress:
+          type: boolean
+          title: Progress
+      type: object
+      required:
+      - execution_id
+      - action_id
+      - status
+      - result_fingerprint
+      - progress
+      title: RuntimeActionCompleted
+    RuntimeActionDecision:
+      properties:
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        action_id:
+          type: string
+          format: uuid
+          title: Action Id
+        decision:
+          $ref: '#/components/schemas/RuntimeDecision'
+        operation_fingerprint:
+          type: string
+          title: Operation Fingerprint
+        occurrence:
+          type: integer
+          title: Occurrence
+        threshold:
+          type: integer
+          title: Threshold
+        reason:
+          type: string
+          title: Reason
+        evidence:
+          additionalProperties: true
+          type: object
+          title: Evidence
+        checkpoint_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Checkpoint Id
+      type: object
+      required:
+      - execution_id
+      - action_id
+      - decision
+      - operation_fingerprint
+      - occurrence
+      - threshold
+      - reason
+      title: RuntimeActionDecision
+    RuntimeBudgetProjection:
+      properties:
+        policy_id:
+          type: string
+          format: uuid
+          title: Policy Id
+        name:
+          type: string
+          title: Name
+        scope_type:
+          type: string
+          title: Scope Type
+        period_type:
+          type: string
+          title: Period Type
+        mode:
+          $ref: '#/components/schemas/RuntimePolicyMode'
+        consumed_requests:
+          type: integer
+          minimum: 0.0
+          title: Consumed Requests
+        consumed_tokens:
+          type: integer
+          minimum: 0.0
+          title: Consumed Tokens
+        consumed_cost:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Consumed Cost
+        projected_requests:
+          type: integer
+          minimum: 0.0
+          title: Projected Requests
+        projected_tokens:
+          type: integer
+          minimum: 0.0
+          title: Projected Tokens
+        projected_cost:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Projected Cost
+        max_requests:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Requests
+        max_tokens:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Tokens
+        max_cost:
+          anyOf:
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Max Cost
+        exceeded:
+          type: boolean
+          title: Exceeded
+      type: object
+      required:
+      - policy_id
+      - name
+      - scope_type
+      - period_type
+      - mode
+      - consumed_requests
+      - consumed_tokens
+      - consumed_cost
+      - projected_requests
+      - projected_tokens
+      - projected_cost
+      - exceeded
+      title: RuntimeBudgetProjection
+    RuntimeCancellationResult:
+      properties:
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        status:
+          type: string
+          title: Status
+        checkpoint_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Checkpoint Id
+      type: object
+      required:
+      - execution_id
+      - status
+      title: RuntimeCancellationResult
+    RuntimeCheckpoint:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        status:
+          type: string
+          title: Status
+        content_fingerprint:
+          type: string
+          title: Content Fingerprint
+        packet:
+          $ref: '#/components/schemas/ContinuityPacket'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        consumed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Consumed At
+      type: object
+      required:
+      - id
+      - execution_id
+      - status
+      - content_fingerprint
+      - packet
+      - created_at
+      title: RuntimeCheckpoint
+    RuntimeDecision:
+      type: string
+      enum:
+      - allow
+      - warn
+      - block
+      - cancel
+      title: RuntimeDecision
+    RuntimeExecutionCreated:
+      properties:
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        trace_id:
+          type: string
+          title: Trace Id
+        status:
+          type: string
+          title: Status
+        repeat_threshold:
+          type: integer
+          title: Repeat Threshold
+        policy_mode:
+          $ref: '#/components/schemas/RuntimePolicyMode'
+      type: object
+      required:
+      - execution_id
+      - trace_id
+      - status
+      - repeat_threshold
+      - policy_mode
+      title: RuntimeExecutionCreated
+    RuntimeExecutionRequest:
+      properties:
+        task:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Task
+        model:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Model
+        provider:
+          type: string
+          maxLength: 64
+          minLength: 1
+          title: Provider
+          default: custom
+        application_slug:
+          anyOf:
+          - type: string
+            maxLength: 63
+            minLength: 1
+          - type: 'null'
+          title: Application Slug
+        agent_slug:
+          anyOf:
+          - type: string
+            maxLength: 63
+            minLength: 1
+          - type: 'null'
+          title: Agent Slug
+        repeat_threshold:
+          type: integer
+          maximum: 20.0
+          minimum: 2.0
+          title: Repeat Threshold
+          default: 3
+        window_size:
+          type: integer
+          maximum: 100.0
+          minimum: 4.0
+          title: Window Size
+          default: 12
+        policy_mode:
+          $ref: '#/components/schemas/RuntimePolicyMode'
+          default: enforce
+      additionalProperties: false
+      type: object
+      required:
+      - task
+      - model
+      title: RuntimeExecutionRequest
+    RuntimeIntervention:
+      properties:
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        execution_status:
+          type: string
+          title: Execution Status
+        policy_code:
+          type: string
+          title: Policy Code
+        policy_mode:
+          $ref: '#/components/schemas/RuntimePolicyMode'
+        outcome:
+          type: string
+          title: Outcome
+        reason:
+          type: string
+          title: Reason
+        evidence:
+          additionalProperties: true
+          type: object
+          title: Evidence
+        decided_at:
+          type: string
+          format: date-time
+          title: Decided At
+        checkpoint:
+          anyOf:
+          - $ref: '#/components/schemas/RuntimeCheckpoint'
+          - type: 'null'
+      type: object
+      required:
+      - execution_id
+      - execution_status
+      - policy_code
+      - policy_mode
+      - outcome
+      - reason
+      - decided_at
+      title: RuntimeIntervention
+    RuntimePolicyMode:
+      type: string
+      enum:
+      - observe
+      - warn
+      - enforce
+      title: RuntimePolicyMode
+    RuntimePreflightRequest:
+      properties:
+        input_tokens:
+          type: integer
+          minimum: 0.0
+          title: Input Tokens
+        requested_output_tokens:
+          type: integer
+          maximum: 32768.0
+          minimum: 1.0
+          title: Requested Output Tokens
+        estimated_cost:
+          anyOf:
+          - type: number
+            minimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Estimated Cost
+          default: '0'
+      additionalProperties: false
+      type: object
+      required:
+      - input_tokens
+      - requested_output_tokens
+      title: RuntimePreflightRequest
+    RuntimePreflightResult:
+      properties:
+        execution_id:
+          type: string
+          format: uuid
+          title: Execution Id
+        decision:
+          $ref: '#/components/schemas/RuntimeDecision'
+        reason:
+          type: string
+          title: Reason
+        provider:
+          type: string
+          title: Provider
+        model:
+          type: string
+          title: Model
+        input_tokens:
+          type: integer
+          title: Input Tokens
+        reserved_output_tokens:
+          type: integer
+          title: Reserved Output Tokens
+        safety_margin_tokens:
+          type: integer
+          title: Safety Margin Tokens
+        projected_context_tokens:
+          type: integer
+          title: Projected Context Tokens
+        context_window_tokens:
+          type: integer
+          title: Context Window Tokens
+        context_remaining_tokens:
+          type: integer
+          title: Context Remaining Tokens
+        context_utilization:
+          type: number
+          minimum: 0.0
+          title: Context Utilization
+        budgets:
+          items:
+            $ref: '#/components/schemas/RuntimeBudgetProjection'
+          type: array
+          title: Budgets
+        checkpoint_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Checkpoint Id
+      type: object
+      required:
+      - execution_id
+      - decision
+      - reason
+      - provider
+      - model
+      - input_tokens
+      - reserved_output_tokens
+      - safety_margin_tokens
+      - projected_context_tokens
+      - context_window_tokens
+      - context_remaining_tokens
+      - context_utilization
+      title: RuntimePreflightResult
+    RuntimeRecoveryRequest:
+      properties:
+        strategy:
+          $ref: '#/components/schemas/RecoveryStrategy'
+        target_provider:
+          anyOf:
+          - type: string
+            maxLength: 64
+            minLength: 1
+          - type: 'null'
+          title: Target Provider
+        target_model:
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+          - type: 'null'
+          title: Target Model
+        modified_arguments:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Modified Arguments
+      additionalProperties: false
+      type: object
+      required:
+      - strategy
+      title: RuntimeRecoveryRequest
+    RuntimeRecoveryResult:
+      properties:
+        source_execution_id:
+          type: string
+          format: uuid
+          title: Source Execution Id
+        strategy:
+          $ref: '#/components/schemas/RecoveryStrategy'
+        status:
+          type: string
+          title: Status
+        resumed_execution_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Resumed Execution Id
+        target_provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Provider
+        target_model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Target Model
+        checkpoint:
+          $ref: '#/components/schemas/RuntimeCheckpoint'
+        message:
+          type: string
+          title: Message
+        completion:
+          anyOf:
+          - $ref: '#/components/schemas/ChatCompletion'
+          - type: 'null'
+      type: object
+      required:
+      - source_execution_id
+      - strategy
+      - status
+      - checkpoint
+      - message
+      title: RuntimeRecoveryResult
+    SpanSummary:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        parent_span_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Parent Span Id
+        sequence_no:
+          type: integer
+          title: Sequence No
+        kind:
+          type: string
+          title: Kind
+        name:
+          type: string
+          title: Name
+        tool_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tool Name
+        status:
+          type: string
+          title: Status
+        duration_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Duration Ms
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+        started_at:
+          type: string
+          format: date-time
+          title: Started At
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Completed At
+        attributes:
+          additionalProperties: true
+          type: object
+          title: Attributes
+      type: object
+      required:
+      - id
+      - sequence_no
+      - kind
+      - name
+      - status
+      - duration_ms
+      - error_code
+      - started_at
+      - completed_at
+      title: SpanSummary
+    StreamOptions:
+      properties:
+        include_usage:
+          type: boolean
+          title: Include Usage
+          default: true
+      type: object
+      title: StreamOptions
+    ToolCall:
+      properties:
+        id:
+          type: string
+          title: Id
+        type:
+          type: string
+          title: Type
+          default: function
+        function:
+          $ref: '#/components/schemas/FunctionCall'
+      type: object
+      required:
+      - id
+      - function
+      title: ToolCall
+    Usage:
+      properties:
+        prompt_tokens:
+          type: integer
+          minimum: 0.0
+          title: Prompt Tokens
+        completion_tokens:
+          type: integer
+          minimum: 0.0
+          title: Completion Tokens
+        total_tokens:
+          type: integer
+          minimum: 0.0
+          title: Total Tokens
+      type: object
+      required:
+      - prompt_tokens
+      - completion_tokens
+      - total_tokens
+      title: Usage
+    UsageSummary:
+      properties:
+        source_type:
+          type: string
+          title: Source Type
+        provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Provider
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+        input_tokens:
+          type: integer
+          title: Input Tokens
+        output_tokens:
+          type: integer
+          title: Output Tokens
+        total_tokens:
+          type: integer
+          title: Total Tokens
+        cost_amount:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Cost Amount
+        currency:
+          type: string
+          title: Currency
+        latency_ms:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Latency Ms
+        observed_at:
+          type: string
+          format: date-time
+          title: Observed At
+      type: object
+      required:
+      - source_type
+      - provider
+      - model
+      - input_tokens
+      - output_tokens
+      - total_tokens
+      - cost_amount
+      - currency
+      - latency_ms
+      - observed_at
+      title: UsageSummary
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WorkspaceContext:
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+          title: Organization Id
+        organization_name:
+          type: string
+          title: Organization Name
+        project_id:
+          type: string
+          format: uuid
+          title: Project Id
+        project_slug:
+          type: string
+          title: Project Slug
+        project_name:
+          type: string
+          title: Project Name
+        applications:
+          items:
+            $ref: '#/components/schemas/ApplicationContext'
+          type: array
+          title: Applications
+        budgets:
+          items:
+            $ref: '#/components/schemas/BudgetPolicyContext'
+          type: array
+          title: Budgets
+        requests_24h:
+          type: integer
+          minimum: 0.0
+          title: Requests 24H
+        tokens_24h:
+          type: integer
+          minimum: 0.0
+          title: Tokens 24H
+        cost_24h:
+          type: string
+          pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Cost 24H
+      type: object
+      required:
+      - organization_id
+      - organization_name
+      - project_id
+      - project_slug
+      - project_name
+      - requests_24h
+      - tokens_24h
+      - cost_24h
+      title: WorkspaceContext
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: c0ntr0l project API key
-  schemas:
-    DependencyHealth:
-      type: object
-      required: [status]
-      properties:
-        status:
-          type: string
-          enum: [healthy, unhealthy]
-        detail:
-          type: [string, "null"]
-    HealthResponse:
-      type: object
-      required: [status, service, version, dependencies]
-      properties:
-        status:
-          type: string
-          enum: [ok, degraded]
-        service:
-          type: string
-        version:
-          type: string
-        dependencies:
-          type: object
-          additionalProperties:
-            $ref: "#/components/schemas/DependencyHealth"
-    ChatMessage:
-      type: object
-      required: [role, content]
-      properties:
-        role:
-          type: string
-          enum: [system, user, assistant, tool]
-        content:
-          type: string
-          minLength: 1
-          maxLength: 32768
-        name:
-          type: [string, "null"]
-          maxLength: 128
-    ChatRequest:
-      type: object
-      required: [model, messages]
-      properties:
-        model:
-          type: string
-          minLength: 1
-          maxLength: 128
-        messages:
-          type: array
-          minItems: 1
-          maxItems: 100
-          items:
-            $ref: "#/components/schemas/ChatMessage"
-        stream:
-          type: boolean
-          default: false
-        max_tokens:
-          type: integer
-          minimum: 1
-          maximum: 4096
-          default: 256
-        temperature:
-          type: [number, "null"]
-          minimum: 0
-          maximum: 2
-    Usage:
-      type: object
-      required: [prompt_tokens, completion_tokens, total_tokens]
-      properties:
-        prompt_tokens:
-          type: integer
-          minimum: 0
-        completion_tokens:
-          type: integer
-          minimum: 0
-        total_tokens:
-          type: integer
-          minimum: 0
-    FunctionCall:
-      type: object
-      required: [name, arguments]
-      properties:
-        name:
-          type: string
-        arguments:
-          type: string
-    ToolCall:
-      type: object
-      required: [id, type, function]
-      properties:
-        id:
-          type: string
-        type:
-          type: string
-          const: function
-        function:
-          $ref: "#/components/schemas/FunctionCall"
-    ResponseMessage:
-      type: object
-      required: [role, content]
-      properties:
-        role:
-          type: string
-          const: assistant
-        content:
-          type: [string, "null"]
-        tool_calls:
-          type: [array, "null"]
-          items:
-            $ref: "#/components/schemas/ToolCall"
-    ChatChoice:
-      type: object
-      required: [index, message, finish_reason]
-      properties:
-        index:
-          type: integer
-        message:
-          $ref: "#/components/schemas/ResponseMessage"
-        finish_reason:
-          type: string
-    ChatCompletion:
-      type: object
-      required: [id, object, created, model, choices, usage]
-      properties:
-        id:
-          type: string
-        object:
-          type: string
-          const: chat.completion
-        created:
-          type: integer
-        model:
-          type: string
-        choices:
-          type: array
-          minItems: 1
-          items:
-            $ref: "#/components/schemas/ChatChoice"
-        usage:
-          $ref: "#/components/schemas/Usage"
-    SpanSummary:
-      type: object
-      required: [id, sequence_no, kind, name, status, started_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        sequence_no:
-          type: integer
-        kind:
-          type: string
-        name:
-          type: string
-        status:
-          type: string
-        duration_ms:
-          type: [integer, "null"]
-        error_code:
-          type: [string, "null"]
-        started_at:
-          type: string
-          format: date-time
-        completed_at:
-          type: [string, "null"]
-          format: date-time
-    UsageSummary:
-      type: object
-      required:
-        - source_type
-        - input_tokens
-        - output_tokens
-        - total_tokens
-        - cost_amount
-        - currency
-        - observed_at
-      properties:
-        source_type:
-          type: string
-        provider:
-          type: [string, "null"]
-        model:
-          type: [string, "null"]
-        input_tokens:
-          type: integer
-        output_tokens:
-          type: integer
-        total_tokens:
-          type: integer
-        cost_amount:
-          type: number
-        currency:
-          type: string
-        latency_ms:
-          type: [integer, "null"]
-        observed_at:
-          type: string
-          format: date-time
-    ExecutionSummary:
-      type: object
-      required:
-        - id
-        - status
-        - requested_model
-        - is_streaming
-        - started_at
-        - span_count
-        - total_tokens
-        - total_cost
-      properties:
-        id:
-          type: string
-          format: uuid
-        status:
-          type: string
-        requested_model:
-          type: string
-        active_provider:
-          type: [string, "null"]
-        active_model:
-          type: [string, "null"]
-        is_streaming:
-          type: boolean
-        input_fingerprint:
-          type: [string, "null"]
-        output_fingerprint:
-          type: [string, "null"]
-        final_reason:
-          type: [string, "null"]
-        error_code:
-          type: [string, "null"]
-        started_at:
-          type: string
-          format: date-time
-        completed_at:
-          type: [string, "null"]
-          format: date-time
-        duration_ms:
-          type: [integer, "null"]
-        span_count:
-          type: integer
-          minimum: 0
-        total_tokens:
-          type: integer
-          minimum: 0
-        total_cost:
-          type: number
-          minimum: 0
-    ExecutionDetail:
-      allOf:
-        - $ref: "#/components/schemas/ExecutionSummary"
-        - type: object
-          required: [spans, usage]
-          properties:
-            spans:
-              type: array
-              items:
-                $ref: "#/components/schemas/SpanSummary"
-            usage:
-              type: array
-              items:
-                $ref: "#/components/schemas/UsageSummary"

@@ -14,3 +14,8 @@ class ProviderUnavailableError(ProviderError):
 
 class ProviderResponseError(ProviderError):
     code = "invalid_provider_response"
+
+
+class ProviderNotConfiguredError(ProviderError):
+    code = "provider_not_configured"
+    attempt_status = "failed"

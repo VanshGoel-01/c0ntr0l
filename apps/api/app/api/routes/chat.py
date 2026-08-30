@@ -2,6 +2,7 @@ from typing import Annotated
 
 from control_schemas import ChatCompletion, ChatRequest
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import get_chat_service, get_principal
 from app.domain.auth import ApiKeyPrincipal
@@ -10,7 +11,7 @@ from app.providers.errors import (
     ProviderTimeoutError,
     ProviderUnavailableError,
 )
-from app.services.chat import ChatService, StreamingNotImplementedError
+from app.services.chat import ChatService
 
 router = APIRouter(prefix="/v1", tags=["chat"])
 PrincipalDependency = Annotated[ApiKeyPrincipal, Depends(get_principal)]
@@ -22,6 +23,14 @@ RequestIdHeader = Annotated[
 DemoScenarioHeader = Annotated[
     str | None,
     Header(alias="X-Control-Demo-Scenario", min_length=1, max_length=32),
+]
+ApplicationHeader = Annotated[
+    str | None,
+    Header(alias="X-Control-Application", min_length=1, max_length=63),
+]
+AgentHeader = Annotated[
+    str | None,
+    Header(alias="X-Control-Agent", min_length=1, max_length=63),
 ]
 
 
@@ -38,7 +47,9 @@ async def create_chat_completion(
     service: ChatServiceDependency,
     request_id: RequestIdHeader = None,
     demo_scenario: DemoScenarioHeader = None,
-) -> ChatCompletion:
+    application_slug: ApplicationHeader = None,
+    agent_slug: AgentHeader = None,
+) -> ChatCompletion | StreamingResponse:
     settings = request.app.state.settings
     if demo_scenario is not None and not settings.allow_demo_scenarios:
         raise HTTPException(
@@ -46,17 +57,32 @@ async def create_chat_completion(
             detail="Demo scenarios are disabled",
         )
     try:
+        if body.stream:
+            stream = await service.stream(
+                principal,
+                body,
+                request_id=request_id,
+                demo_scenario=demo_scenario,
+                application_slug=application_slug,
+                agent_slug=agent_slug,
+            )
+            return StreamingResponse(
+                stream.events,
+                media_type="text/event-stream",
+                headers={
+                    "X-Control-Execution-Id": stream.execution_id,
+                    "Cache-Control": "no-store",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         result = await service.complete(
             principal,
             body,
             request_id=request_id,
             demo_scenario=demo_scenario,
+            application_slug=application_slug,
+            agent_slug=agent_slug,
         )
-    except StreamingNotImplementedError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Streaming reconciliation is not implemented yet; send stream=false",
-        ) from exc
     except ProviderTimeoutError as exc:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,

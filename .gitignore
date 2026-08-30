@@ -13,6 +13,7 @@ node_modules/
 .next/
 out/
 coverage/
+*.tsbuildinfo
 
 # Environment and secrets
 .env
@@ -24,6 +25,7 @@ coverage/
 # Editors and operating systems
 .idea/
 .vscode/
+.codex/
 .DS_Store
 Thumbs.db
 

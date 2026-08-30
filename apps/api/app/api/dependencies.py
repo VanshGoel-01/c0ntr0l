@@ -4,12 +4,16 @@ from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.domain.auth import ApiKeyPrincipal, InvalidApiKeyError
+from app.infrastructure.execution_events import ExecutionEvents
 from app.services.authentication import AuthenticationService
 from app.services.chat import ChatService
 from app.services.executions import ExecutionQueryService
 from app.services.health import HealthService
+from app.services.incidents import IncidentService
+from app.services.runtime import RuntimeService
+from app.services.workspace import WorkspaceService
 
-bearer_scheme = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False, scheme_name="bearerAuth")
 
 
 def get_health_service(request: Request) -> HealthService:
@@ -26,6 +30,22 @@ def get_chat_service(request: Request) -> ChatService:
 
 def get_execution_query_service(request: Request) -> ExecutionQueryService:
     return request.app.state.execution_query_service
+
+
+def get_workspace_service(request: Request) -> WorkspaceService:
+    return request.app.state.workspace_service
+
+
+def get_incident_service(request: Request) -> IncidentService:
+    return request.app.state.incident_service
+
+
+def get_runtime_service(request: Request) -> RuntimeService:
+    return request.app.state.runtime_service
+
+
+def get_execution_events(request: Request) -> ExecutionEvents:
+    return request.app.state.execution_events
 
 
 async def get_principal(

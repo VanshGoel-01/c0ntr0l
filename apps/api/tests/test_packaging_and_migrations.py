@@ -25,3 +25,30 @@ def test_request_ids_are_correlation_values_not_global_unique_keys() -> None:
         compatibility_migration
     )
     assert "ON control.executions (project_id, request_id)" in compatibility_migration
+
+
+def test_runtime_recovery_schema_preserves_checkpoint_and_audit_history() -> None:
+    recovery_schema = (
+        ROOT / "migrations" / "postgres" / "070_runtime_recovery.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS control.continuity_checkpoints" in recovery_schema
+    assert "CREATE TABLE IF NOT EXISTS control.recovery_attempts" in recovery_schema
+    assert "raw provider context are forbidden" in recovery_schema
+
+
+def test_budget_reservations_track_claimed_provider_requests() -> None:
+    reservation_schema = (
+        ROOT / "migrations" / "postgres" / "080_budget_reservation_claims.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "ADD COLUMN IF NOT EXISTS claimed_requests" in reservation_schema
+
+
+def test_recovery_attempts_support_pre_provider_budget_blocks() -> None:
+    admission_schema = (
+        ROOT / "migrations" / "postgres" / "090_recovery_budget_admission.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "'blocked'" in admission_schema
+    assert "recovery_attempts_status_check" in admission_schema
