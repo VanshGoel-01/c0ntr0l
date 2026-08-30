@@ -100,7 +100,9 @@ class ControlClient:
 
     def intervention(self, execution_id: UUID) -> RuntimeIntervention | None:
         response = self._send(
-            "GET", f"/api/v1/runtime/executions/{execution_id}/intervention"
+            "GET",
+            f"/api/v1/runtime/executions/{execution_id}/intervention",
+            allowed_statuses={404},
         )
         if response.status_code == 404:
             return None
@@ -127,7 +129,14 @@ class ControlClient:
     def _request(self, method: str, path: str, **kwargs: object) -> Any:
         return self._response_json(self._send(method, path, **kwargs))
 
-    def _send(self, method: str, path: str, **kwargs: object) -> httpx.Response:
+    def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        allowed_statuses: set[int] | None = None,
+        **kwargs: object,
+    ) -> httpx.Response:
         try:
             response = self._client.request(method, path, **kwargs)
         except httpx.TimeoutException as exc:
@@ -139,7 +148,9 @@ class ControlClient:
             raise ControlApiError(
                 "Control API redirects are refused for credential safety"
             )
-        if response.is_error:
+        if response.is_error and response.status_code not in (
+            allowed_statuses or set()
+        ):
             detail = "Request failed"
             try:
                 payload = response.json()

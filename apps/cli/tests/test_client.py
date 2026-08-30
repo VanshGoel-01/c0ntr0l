@@ -82,3 +82,14 @@ def test_client_rejects_malformed_success_payload() -> None:
         pytest.raises(ControlApiError, match="malformed data"),
     ):
         client.workspace()
+
+
+def test_missing_optional_intervention_returns_none() -> None:
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(404, json={"detail": "Not found"})
+    )
+
+    with ControlClient(CONFIG, transport=transport) as client:
+        result = client.intervention(UUID("00000000-0000-0000-0000-000000000010"))
+
+    assert result is None

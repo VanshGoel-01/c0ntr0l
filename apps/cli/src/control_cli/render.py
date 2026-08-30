@@ -51,6 +51,10 @@ def status_table(
 
 
 def executions_table(console: Console, executions: list[ExecutionSummary]) -> None:
+    if console.width < 120:
+        _compact_executions(console, executions)
+        return
+
     table = Table(title=f"Executions ({len(executions)})")
     table.add_column("Trace", no_wrap=True)
     table.add_column("Application")
@@ -70,6 +74,25 @@ def executions_table(console: Console, executions: list[ExecutionSummary]) -> No
             _time(execution.started_at),
         )
     console.print(table)
+
+
+def _compact_executions(console: Console, executions: list[ExecutionSummary]) -> None:
+    console.print(f"[bold]Executions ({len(executions)})[/bold]")
+    for index, execution in enumerate(executions):
+        record = Table.grid(padding=(0, 1))
+        record.add_column(style="dim", no_wrap=True)
+        record.add_column(overflow="fold")
+        record.add_row("Execution", Text(str(execution.id), style="bold"))
+        record.add_row("Trace", execution.request_id or "-")
+        record.add_row("Application", execution.application_name or "-")
+        record.add_row("Model", execution.active_model or execution.requested_model)
+        record.add_row("Status", _state(execution.status))
+        record.add_row("Tokens", f"{execution.total_tokens:,}")
+        record.add_row("Duration", _duration(execution.duration_ms))
+        record.add_row("Started", _time(execution.started_at))
+        console.print(record)
+        if index < len(executions) - 1:
+            console.print()
 
 
 def execution_detail(
@@ -97,6 +120,10 @@ def execution_detail(
             summary.add_row("Checkpoint", str(intervention.checkpoint.id))
     console.print(summary)
 
+    if console.width < 120:
+        _compact_spans(console, execution)
+        return
+
     spans = Table(title=f"Spans ({len(execution.spans)})")
     spans.add_column("#", justify="right")
     spans.add_column("Kind")
@@ -116,7 +143,29 @@ def execution_detail(
     console.print(spans)
 
 
+def _compact_spans(console: Console, execution: ExecutionDetail) -> None:
+    console.print(f"[bold]Spans ({len(execution.spans)})[/bold]")
+    for index, span in enumerate(execution.spans):
+        record = Table.grid(padding=(0, 1))
+        record.add_column(style="dim", no_wrap=True)
+        record.add_column(overflow="fold")
+        record.add_row("Span", str(span.id))
+        record.add_row("Sequence", str(span.sequence_no))
+        record.add_row("Kind", span.kind)
+        record.add_row("Name", span.name)
+        record.add_row("Status", _state(span.status))
+        record.add_row("Duration", _duration(span.duration_ms))
+        record.add_row("Error", span.error_code or "-")
+        console.print(record)
+        if index < len(execution.spans) - 1:
+            console.print()
+
+
 def incidents_table(console: Console, incidents: list[IncidentContext]) -> None:
+    if console.width < 120:
+        _compact_incidents(console, incidents)
+        return
+
     table = Table(title=f"Incidents ({len(incidents)})")
     table.add_column("ID", no_wrap=True)
     table.add_column("Severity")
@@ -136,6 +185,25 @@ def incidents_table(console: Console, incidents: list[IncidentContext]) -> None:
             _time(incident.created_at),
         )
     console.print(table)
+
+
+def _compact_incidents(console: Console, incidents: list[IncidentContext]) -> None:
+    console.print(f"[bold]Incidents ({len(incidents)})[/bold]")
+    for index, incident in enumerate(incidents):
+        record = Table.grid(padding=(0, 1))
+        record.add_column(style="dim", no_wrap=True)
+        record.add_column(overflow="fold")
+        record.add_row("Incident", Text(str(incident.id), style="bold"))
+        record.add_row("Execution", str(incident.execution_id))
+        record.add_row("Severity", _state(incident.severity))
+        record.add_row("Type", incident.incident_type.replace("_", " "))
+        record.add_row("Application", incident.application_name)
+        record.add_row("Description", incident.title)
+        record.add_row("Status", _state(incident.status.value))
+        record.add_row("Created", _time(incident.created_at))
+        console.print(record)
+        if index < len(incidents) - 1:
+            console.print()
 
 
 def incident_result(console: Console, incident: IncidentContext) -> None:
