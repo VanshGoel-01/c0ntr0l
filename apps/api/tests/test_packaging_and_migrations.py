@@ -43,3 +43,12 @@ def test_budget_reservations_track_claimed_provider_requests() -> None:
     ).read_text(encoding="utf-8")
 
     assert "ADD COLUMN IF NOT EXISTS claimed_requests" in reservation_schema
+
+
+def test_recovery_attempts_support_pre_provider_budget_blocks() -> None:
+    admission_schema = (
+        ROOT / "migrations" / "postgres" / "090_recovery_budget_admission.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "'blocked'" in admission_schema
+    assert "recovery_attempts_status_check" in admission_schema

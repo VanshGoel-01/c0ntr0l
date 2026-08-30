@@ -62,3 +62,12 @@ def build_recovery_chat_request(
         max_tokens=max_tokens,
         temperature=0,
     )
+
+
+def estimate_chat_input_tokens(request: ChatRequest) -> int:
+    """Return a conservative tokenizer-independent admission estimate."""
+    content_bytes = sum(
+        len(message.content.encode("utf-8")) for message in request.messages
+    )
+    message_overhead = (len(request.messages) * 4) + 2
+    return max(1, content_bytes + message_overhead)

@@ -7,8 +7,8 @@ from control_schemas import (
     ContinuityPacket,
     RecoveryStrategy,
     RuntimeActionCheckRequest,
-    RuntimeActionCompleteRequest,
     RuntimeActionCompleted,
+    RuntimeActionCompleteRequest,
     RuntimeActionDecision,
     RuntimeCancellationResult,
     RuntimeCheckpoint,
@@ -905,7 +905,8 @@ class RuntimeRepository:
             if checkpoint_row is None:
                 raise RuntimeRecoveryError("No available checkpoint exists")
             checkpoint = self._checkpoint_from_row(checkpoint_row)
-            assert checkpoint is not None
+            if checkpoint is None:
+                raise RuntimeRecoveryError("The available checkpoint is invalid")
             if request.strategy is RecoveryStrategy.STOP:
                 await connection.execute(
                     text(

@@ -30,9 +30,10 @@ class RecoveryRepository:
     ) -> RecoveryTrace:
         async with self._database.begin() as connection:
             execution = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT execution.status, root.id AS root_span_id,
                                COALESCE((
                                    SELECT max(span.sequence_no) + 1
@@ -46,10 +47,13 @@ class RecoveryRepository:
                         WHERE execution.id = :execution_id
                         FOR UPDATE OF execution
                         """
-                    ),
-                    {"execution_id": execution_id},
+                        ),
+                        {"execution_id": execution_id},
+                    )
                 )
-            ).mappings().one_or_none()
+                .mappings()
+                .one_or_none()
+            )
             if execution is None or execution["status"] != "running":
                 raise RecoveryExecutionNotActiveError
 
@@ -75,7 +79,11 @@ class RecoveryRepository:
                                 "sequence_no": execution["next_sequence_no"],
                                 "name": f"{provider}.recovery.completion",
                                 "attributes": json.dumps(
-                                    {"recovery": True, "provider": provider, "model": model}
+                                    {
+                                        "recovery": True,
+                                        "provider": provider,
+                                        "model": model,
+                                    }
                                 ),
                             },
                         )
@@ -117,6 +125,31 @@ class RecoveryRepository:
             provider_span_id=provider_span_id,
             provider_attempt_id=provider_attempt_id,
         )
+
+    async def block(self, execution_id: UUID, reason: str) -> None:
+        async with self._database.begin() as connection:
+            now = await self._database_now(connection)
+            await connection.execute(
+                text(
+                    """
+                    UPDATE control.recovery_attempts
+                    SET status = 'blocked', completed_at = :now,
+                        details = details || CAST(:details AS jsonb)
+                    WHERE resumed_execution_id = :execution_id
+                      AND status = 'prepared'
+                    """
+                ),
+                {
+                    "execution_id": execution_id,
+                    "now": now,
+                    "details": json.dumps(
+                        {
+                            "error_code": "recovery_preflight_block",
+                            "reason": reason,
+                        }
+                    ),
+                },
+            )
 
     async def complete(
         self,
@@ -198,7 +231,7 @@ class RecoveryRepository:
                 connection,
                 trace.execution_id,
                 actual_tokens=completion.usage.total_tokens,
-                actual_cost=Decimal("0"),
+                actual_cost=Decimal(0),
                 now=now,
             )
             await connection.execute(
@@ -222,6 +255,7 @@ class RecoveryRepository:
                     ),
                 },
             )
+
     async def fail(
         self,
         trace: RecoveryTrace,
@@ -301,7 +335,7 @@ class RecoveryRepository:
                 connection,
                 trace.execution_id,
                 actual_tokens=0,
-                actual_cost=Decimal("0"),
+                actual_cost=Decimal(0),
                 now=now,
             )
 

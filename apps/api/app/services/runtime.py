@@ -1,11 +1,13 @@
 from uuid import UUID
 
 from control_schemas import (
+    RecoveryStrategy,
     RuntimeActionCheckRequest,
-    RuntimeActionCompleteRequest,
     RuntimeActionCompleted,
+    RuntimeActionCompleteRequest,
     RuntimeActionDecision,
     RuntimeCancellationResult,
+    RuntimeDecision,
     RuntimeExecutionCreated,
     RuntimeExecutionRequest,
     RuntimeIntervention,
@@ -13,10 +15,10 @@ from control_schemas import (
     RuntimePreflightResult,
     RuntimeRecoveryRequest,
     RuntimeRecoveryResult,
-    RecoveryStrategy,
 )
 
 from app.domain.auth import ApiKeyPrincipal
+from app.domain.recovery import estimate_chat_input_tokens
 from app.infrastructure.runtime_signals import RuntimeSignals
 from app.providers.registry import ProviderRegistry
 from app.repositories.runtime import RuntimeRepository
@@ -112,9 +114,7 @@ class RuntimeService:
         try:
             return await self._repository.cancel(principal, execution_id)
         except Exception:
-            await self._signals.clear_cancellation(
-                principal.project_id, execution_id
-            )
+            await self._signals.clear_cancellation(principal.project_id, execution_id)
             raise
 
     async def recover(
@@ -132,5 +132,22 @@ class RuntimeService:
             RecoveryStrategy.RETRY_MODIFIED,
             RecoveryStrategy.MODEL_HANDOFF,
         }:
-            return await self._recovery_runner.run(result, request)
+            if result.resumed_execution_id is None:
+                return result
+            chat_request = self._recovery_runner.build_request(result, request)
+            admission = await self.preflight(
+                principal,
+                result.resumed_execution_id,
+                RuntimePreflightRequest(
+                    input_tokens=estimate_chat_input_tokens(chat_request),
+                    requested_output_tokens=chat_request.max_tokens,
+                ),
+            )
+            if admission.decision is RuntimeDecision.BLOCK:
+                return await self._recovery_runner.block(result, admission.reason)
+            return await self._recovery_runner.run(
+                result,
+                request,
+                chat_request,
+            )
         return result

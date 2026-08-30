@@ -2,7 +2,11 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
-from app.domain.recovery import RecoveryTrace, build_recovery_chat_request
+from app.domain.recovery import (
+    RecoveryTrace,
+    build_recovery_chat_request,
+    estimate_chat_input_tokens,
+)
 from app.providers.registry import ProviderRegistry
 from app.services.recovery import RecoveryRunner
 from control_schemas import (
@@ -80,6 +84,7 @@ class FakeRecoveryRepository:
         self.started: tuple[object, ...] | None = None
         self.completed: tuple[object, ...] | None = None
         self.failed: tuple[object, ...] | None = None
+        self.blocked: tuple[object, ...] | None = None
 
     async def start(self, *args: object) -> RecoveryTrace:
         self.started = args
@@ -90,6 +95,9 @@ class FakeRecoveryRepository:
 
     async def fail(self, *args: object, **kwargs: object) -> None:
         self.failed = (*args, kwargs)
+
+    async def block(self, *args: object) -> None:
+        self.blocked = args
 
 
 class FakeProvider:
@@ -169,3 +177,32 @@ def test_recovery_prompt_redacts_sensitive_modified_arguments() -> None:
     assert "replacement worker" in system_prompt
     assert "concrete next action" in system_prompt
     assert request.temperature == 0
+
+
+def test_recovery_input_estimate_is_conservative() -> None:
+    request = build_recovery_chat_request(
+        packet=checkpoint().packet,
+        target_model="mock-model",
+        modified_arguments={"query": "broader query"},
+        max_tokens=128,
+    )
+
+    content_bytes = sum(
+        len(message.content.encode("utf-8")) for message in request.messages
+    )
+    assert estimate_chat_input_tokens(request) > content_bytes
+
+
+@pytest.mark.asyncio
+async def test_recovery_runner_records_preflight_block() -> None:
+    repository = FakeRecoveryRepository()
+    runner = RecoveryRunner(
+        repository,  # type: ignore[arg-type]
+        ProviderRegistry({}),
+        max_tokens=128,
+    )
+
+    result = await runner.block(prepared_result(), "Budget exhausted")
+
+    assert result.status == "blocked"
+    assert repository.blocked == (RESUMED_ID, "Budget exhausted")
