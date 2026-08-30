@@ -63,7 +63,8 @@ pnpm dev
 Open `http://localhost:3000`, select **Connect**, and enter the API URL and a
 project API key created by the local seed command. The dashboard loads execution,
 workspace, budget, incident, and trace data from authenticated API endpoints.
-Provider cards probe Ollama and the deterministic mock service at runtime.
+Provider cards use the authenticated control-plane catalog and show only models
+that the gateway can currently route to.
 
 The project key is held only in browser memory. It is not written to local or
 session storage and is discarded on reload or disconnect. Incident acknowledge
@@ -103,6 +104,28 @@ Use the global `--json` option for scripts. The CLI reads the key only from
 `CONTROL_API_KEY`, refuses remote plaintext HTTP and redirects, and does not
 require an SSH key. Any terminal with network access to the API can use it after
 installing the package and receiving a valid project key.
+
+## Local Provider Routing
+
+The compatible chat endpoint automatically matches the requested model against
+the live catalogs of enabled no-cost providers. For example, `mock-gpt` routes
+to the deterministic mock provider, while an installed `qwen2.5:0.5b` model
+routes to Ollama. Unknown models and providers are rejected without contacting
+a paid API.
+
+Applications can make the route explicit with the `X-Control-Provider` header:
+
+```text
+POST /v1/chat/completions
+Authorization: Bearer <project-api-key>
+X-Control-Provider: ollama
+
+{"model":"qwen2.5:0.5b","messages":[{"role":"user","content":"Hello"}]}
+```
+
+The response includes `X-Control-Provider`, and the selected provider is stored
+on the execution, provider span, attempt, and usage record. `GET
+/api/v1/providers` returns the authenticated live routing catalog.
 
 ## Python Runtime Guard
 

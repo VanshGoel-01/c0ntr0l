@@ -7,6 +7,7 @@ import type {
   Health,
   Incident,
   IncidentStatus,
+  ProviderCatalog,
   RuntimeCancellationResult,
   RuntimeCheckpoint,
   RuntimeIntervention,
@@ -168,6 +169,14 @@ type ApiWorkspace = {
   requests_24h: number;
   tokens_24h: number;
   cost_24h: string | number;
+};
+type ApiProviderCatalog = {
+  checked_at: string;
+  providers: Array<{
+    name: string;
+    status: "operational" | "unavailable";
+    models: string[];
+  }>;
 };
 
 function normalizeUrl(url: string): string {
@@ -460,6 +469,15 @@ export async function getWorkspace(config: ConnectionConfig, signal?: AbortSigna
     requests24h: value.requests_24h,
     tokens24h: value.tokens_24h,
     cost24h: Number(value.cost_24h),
+  };
+}
+
+export async function listProviders(config: ConnectionConfig, signal?: AbortSignal): Promise<ProviderCatalog> {
+  const response = await fetch(`${normalizeUrl(config.apiUrl)}/api/v1/providers`, { cache: "no-store", headers: authHeaders(config), signal });
+  const value = await readJson<ApiProviderCatalog>(response);
+  return {
+    checkedAt: value.checked_at,
+    providers: value.providers,
   };
 }
 
